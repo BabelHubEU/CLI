@@ -1,0 +1,138 @@
+# BabelHub w GitHub Actions — **fragment do wklejenia do repozytorium aplikacji**.
+#
+# To nie jest CI repozytorium CLI (to leży w `.gitlab-ci.yml`), tylko gotowy plik dla
+# projektu, który **korzysta** z BabelHub: LearnHub, FreelancR albo twoja aplikacja.
+# Skopiuj go do `<twoje-repo>/.github/workflows/babelhub.yml` i popraw dwa miejsca oznaczone
+# `ZMIEŃ`. Instrukcja krok po kroku: `docs/ci.md` w repozytorium BabelHub.
+#
+# Dwa zadania, dwa różne pytania:
+#   `quality` (pull request) — czy ten kod nie wprowadza braków i błędów w tłumaczeniach,
+#   `sync`    (gałąź główna)  — wpisz klucze z kodu do serwisu i zabierz z powrotem tłumaczenia.
+#
+# Cztery rzeczy, które ten plik robi celowo inaczej niż „przykładowe workflow” z blogów:
+#   * bramką jest `babelhub validate`, a **nie** `push` — `push` opisuje stan, `validate` decyduje;
+#   * **każda kontrola to osobny krok z nazwą** (`coverage`, `quality`, `acceptance`,
+#     `hardcoded-strings`), bo GitHub pokazuje w pull requeście nazwę tego kroku, który padł —
+#     czyli developer widzi, co blokuje merge, nie otwierając logu. Jednym krokiem `babelhub
+#     validate` (zestaw z `checks.run` w `.babelhub.yml`) da się to samo, tylko bez tej nazwy;
+#   * kod wyjścia jest jedynym kryterium (0 = zrobione), więc **nigdzie nie ma `|| true`**
+#     ani `continue-on-error` — to dwie najczęstsze formy bramki, która nie blokuje;
+#   * poświadczenie żyje wyłącznie w `secrets`, nigdy w `.babelhub.json` ani w tym pliku.
+
+name: BabelHub
+
+"on":
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Jedna synchronizacja na gałąź naraz: dwa równoległe `sync` z tej samej gałęzi walczyłyby
+# o ten sam commit zwrotny.
+concurrency:
+  group: babelhub-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # ZMIEŃ 1/2: adres twojej instancji BabelHub (albo ustaw go jako zmienną repozytorium).
+  BABELHUB_API_URL: https://babelhub.example
+
+jobs:
+  quality:
+    name: BabelHub — bramka jakości tłumaczeń
+    runs-on: ubuntu-latest
+    # Sekrety nie trafiają do PR-ów z forków, więc job nie ma tam czego szukać. Bez tego
+    # warunku każdy fork kończyłby się błędem poświadczenia i szumem w checkach.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      - name: Zainstaluj CLI babelhub
+        # Po publikacji pakietu (Fala 1, pozycja 1.11) wystarczy druga linia. Do tego czasu
+        # pakiet instalujemy z repozytorium VCS — dlatego obie są w jednym kroku.
+        run: |
+          composer global config repositories.babelhub vcs https://gitlab.com/babelhub/cli.git
+          composer global require babelhub/cli:^0.1 --no-interaction
+          echo "$(composer global config bin-dir --absolute)" >> "$GITHUB_PATH"
+
+      - name: Stan projektu (raport w logu, zawsze kod 0)
+        run: babelhub status --output=plain
+        env:
+          BABELHUB_TOKEN: ${{ secrets.BABELHUB_TOKEN }}
+
+      - name: Co ten kod wniósłby do serwisu (nic nie wysyła)
+        run: babelhub push --dry-run --output=json
+        env:
+          BABELHUB_TOKEN: ${{ secrets.BABELHUB_TOKEN }}
+
+      - name: BabelHub / hardcoded-strings — tekst wpisany wprost w kodzie
+        # Kontrola lokalna: czyta kod, nie serwis, więc **nie potrzebuje tokenu** i nie zależy
+        # od dostępności BabelHub. Stoi pierwsza, bo najtańsza porażka to porażka bez żądania.
+        run: babelhub validate --check=hardcoded-strings --fail-on=error --output=plain
+
+      - name: BabelHub / coverage — brakujące tłumaczenia
+        # Klucz bez zatwierdzonego tłumaczenia jedzie do aplikacji jako surowy klucz — to błąd,
+        # więc blokuje merge (kod 6).
+        run: babelhub validate --check=coverage --fail-on=error --output=plain
+        env:
+          BABELHUB_TOKEN: ${{ secrets.BABELHUB_TOKEN }}
+
+      - name: BabelHub / quality — placeholdery, HTML, ICU, duplikaty
+        run: babelhub validate --check=quality --fail-on=error --output=plain
+        env:
+          BABELHUB_TOKEN: ${{ secrets.BABELHUB_TOKEN }}
+
+      - name: BabelHub / acceptance — niezatwierdzone tłumaczenia
+        # Kontrola ma wagę ostrzeżenia, więc przy `--fail-on=error` **raportuje, ale nie blokuje**:
+        # niezatwierdzona wartość to zwykle praca w toku, a nie defekt. Zespół, który chce twardej
+        # bramki („na main nie wchodzi nic niezatwierdzonego”), zmienia próg na `--fail-on=warning`
+        # — świadomie, bo wtedy blokują też ostrzeżenia z `quality`.
+        run: babelhub validate --check=acceptance --fail-on=error --output=plain
+        env:
+          BABELHUB_TOKEN: ${{ secrets.BABELHUB_TOKEN }}
+
+  sync:
+    name: BabelHub — synchronizacja z kodem
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write # potrzebne, żeby odesłać commit z tłumaczeniami
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      - name: Zainstaluj CLI babelhub
+        run: |
+          composer global config repositories.babelhub vcs https://gitlab.com/babelhub/cli.git
+          composer global require babelhub/cli:^0.1 --no-interaction
+          echo "$(composer global config bin-dir --absolute)" >> "$GITHUB_PATH"
+
+      - name: Klucze z kodu do serwisu, tłumaczenia z serwisu do plików
+        # `sync` = push → pull. Jedno polecenie, więc nie da się zapomnieć drugiej połowy.
+        run: babelhub sync --output=json
+        env:
+          BABELHUB_TOKEN: ${{ secrets.BABELHUB_TOKEN }}
+
+      - name: Odeślij tłumaczenia, jeśli się zmieniły
+        # `.babelhub.lock.json` jedzie razem z plikami: to on odpowiada na pytanie „które wersje
+        # katalogów są w tym commicie”, więc bez niego następny `pull` pobrałby wszystko od nowa.
+        run: |
+          if git diff --quiet -- translations/ .babelhub.lock.json; then
+            echo "Bez zmian — nic nie commituję."
+            exit 0
+          fi
+
+          git config user.name "babelhub[bot]"
+          git config user.email "babelhub[bot]@users.noreply.github.com"
+          git add translations/ .babelhub.lock.json
+          git commit -m "chore(i18n): synchronizacja tłumaczeń z BabelHub"
+          git push

@@ -1,0 +1,50 @@
+#!/usr/bin/env php
+<?php
+
+/**
+ * `babelhub` — wejście CLI.
+ *
+ * Autoload szukamy w dwóch miejscach, bo ten sam plik ma działać w trzech światach:
+ *
+ * 1. **Repozytorium** (albo instalacja jako pakiet główny) — `composer install` w katalogu
+ *    głównym, więc `vendor/` leży obok;
+ * 2. **Binarka PHAR** — tam `__DIR__` to `phar://babelhub.phar/bin`, a wygenerowany autoloader
+ *    leży w archiwum pod `vendor/autoload.php`, czyli pod **tą samą** ścieżką względną. Dlatego
+ *    `bin/babelhub` jedzie do binarki niezmieniony (patrz `PharBuilder`);
+ * 3. **Instalacja jako zależność** (`composer require --dev babelhub/cli`) — wtedy ten plik leży
+ *    w `vendor/babelhub/cli/bin/`, a autoloader projektu jest trzy poziomy wyżej.
+ *
+ * Jedna z tych ścieżek **musi** istnieć, a brak wszystkich jest błędem, który mówi wprost, co
+ * zrobić — milczące „Class not found” na pierwszym poleceniu to najgorszy możliwy komunikat.
+ *
+ * Wersja z monorepo miała trzecią kandydaturę (`../cli/vendor/autoload.php`) i ona zniknęła razem
+ * z wydzieleniem: nie istnieje układ, w którym CLI leży w podkatalogu cudzego repozytorium.
+ * Zostawienie jej „na wszelki wypadek” znaczyłoby ścieżkę, która nigdy nie istnieje, a którą
+ * następny czytelnik próbowałby zrozumieć.
+ */
+
+declare(strict_types=1);
+
+$autoloadCandidates = [
+    __DIR__ . '/../vendor/autoload.php',
+    __DIR__ . '/../../../autoload.php',
+];
+
+$autoload = null;
+foreach ($autoloadCandidates as $candidate) {
+    if (is_file($candidate)) {
+        $autoload = $candidate;
+        break;
+    }
+}
+
+if ($autoload === null) {
+    fwrite(STDERR, "Nie znalazłem autoloadera Composera.\n");
+    fwrite(STDERR, "W repozytorium uruchom `composer install`; globalnie — `composer global require babelhub/cli`.\n");
+    fwrite(STDERR, "Jeśli to binarka PHAR, plik jest uszkodzony — pobierz ją ponownie.\n");
+    exit(1);
+}
+
+require $autoload;
+
+exit(BabelHub\Cli\Console\Application::run());

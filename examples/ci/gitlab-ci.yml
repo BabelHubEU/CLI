@@ -1,0 +1,109 @@
+# BabelHub w GitLab CI — **fragment do wklejenia do `.gitlab-ci.yml` aplikacji**.
+#
+# To odpowiednik `examples/ci/github-actions.yml` dla GitLaba: te same polecenia, ten sam
+# kontrakt kodów wyjścia, ta sama zmienna z poświadczeniem. Różni się tylko to, co w GitLabie
+# musi być inne: `rules` zamiast `if`, `allow_failure` zamiast `continue-on-error` i push przez
+# token projektu (w GitLabie `CI_JOB_TOKEN` **nie** może wypychać commitów do repozytorium).
+#
+# **Cztery kontrole to cztery joby**, a nie jedna lista poleceń. W GitLabie merge request pokazuje
+# nazwy jobów, więc `babelhub:coverage` na czerwono mówi wprost, co blokuje merge — bez otwierania
+# logu. Jedna lista poleceń dałaby to samo dopiero po przeczytaniu logu, czyli po to, po co się
+# tam nie wchodzi. Cena jest jawna: `before_script` (instalacja CLI) powtarza się w każdym jobie.
+#
+# Wklej całość do swojego `.gitlab-ci.yml`. Jeśli masz już sekcję `stages`, dopisz do niej
+# `i18n` (albo podmień `stage:` w jobach na własną nazwę) i popraw miejsca oznaczone `ZMIEŃ`.
+# Instrukcja: `docs/ci.md` w repozytorium BabelHub.
+
+stages:
+  - test
+  - i18n
+
+# Wspólna część jobów. Obraz `composer:2` ma PHP 8.3 i Composera, czyli dokładnie to,
+# czego potrzebuje CLI — bez budowania własnego obrazu.
+.babelhub:
+  image: composer:2
+  variables:
+    # ZMIEŃ 1/2: adres twojej instancji BabelHub.
+    BABELHUB_API_URL: https://babelhub.example
+    # ZMIEŃ 2/2: `BABELHUB_TOKEN` ustaw jako **maskowaną i chronioną** zmienną projektu
+    # (Settings → CI/CD → Variables). Wpis bez wartości mówi tylko, że job tej zmiennej wymaga —
+    # sekretu nie ma w repozytorium i nigdy nie może tu trafić.
+    BABELHUB_TOKEN:
+      description: "Token osobisty BabelHub (zakresy: translations:read, translations:write, qa:read)."
+  before_script:
+    - composer global config repositories.babelhub vcs https://gitlab.com/babelhub/cli.git
+    - composer global require babelhub/cli:^0.1 --no-interaction
+    - export PATH="$PATH:$(composer global config bin-dir --absolute)"
+
+# Reguła dla wszystkich czterech kontroli: merge request. `rules` zamiast `only`, bo `only`/`except`
+# jest w GitLabie przestarzałe i miesza się z `rules` w innych jobach.
+.babelhub:on-merge-request:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: always
+
+# Kontrola lokalna: czyta kod, nie serwis, więc **nie potrzebuje tokenu** i nie zależy od
+# dostępności BabelHub. Dlatego stoi pierwsza — najtańsza porażka to porażka bez żadnego żądania.
+"babelhub:hardcoded-strings":
+  extends:
+    - .babelhub
+    - .babelhub:on-merge-request
+  stage: test
+  script:
+    - babelhub validate --check=hardcoded-strings --fail-on=error --output=plain
+
+# Klucz bez zatwierdzonego tłumaczenia jedzie do aplikacji jako surowy klucz — to błąd, więc blokuje.
+"babelhub:coverage":
+  extends:
+    - .babelhub
+    - .babelhub:on-merge-request
+  stage: test
+  script:
+    - babelhub status --output=plain
+    - babelhub push --dry-run --output=json
+    - babelhub validate --check=coverage --fail-on=error --output=plain
+
+# Placeholdery, HTML, ICU, duplikaty, puste teksty.
+"babelhub:quality":
+  extends:
+    - .babelhub
+    - .babelhub:on-merge-request
+  stage: test
+  script:
+    - babelhub validate --check=quality --fail-on=error --output=plain
+
+# Kontrola ma wagę ostrzeżenia, więc przy `--fail-on=error` **raportuje, ale nie blokuje**:
+# niezatwierdzona wartość to zwykle praca w toku, a nie defekt. Chcesz twardej bramki („na main
+# nie wchodzi nic niezatwierdzonego”)? Zmień próg na `--fail-on=warning` — świadomie, bo wtedy
+# blokują też ostrzeżenia z `quality`.
+"babelhub:acceptance":
+  extends:
+    - .babelhub
+    - .babelhub:on-merge-request
+  stage: test
+  script:
+    - babelhub validate --check=acceptance --fail-on=error --output=plain
+
+# Synchronizacja po scaleniu do gałęzi głównej.
+"babelhub:sync":
+  extends: .babelhub
+  stage: i18n
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: always
+  script:
+    - babelhub sync --output=json
+    # Commit zwrotny tylko wtedy, gdy są zmiany — inaczej każdy przebieg zostawiałby pusty commit.
+    - |
+      if git diff --quiet -- translations/ .babelhub.lock.json; then
+        echo "Bez zmian — nic nie commituję."
+        exit 0
+      fi
+    - git config user.name "babelhub-bot"
+    - git config user.email "babelhub-bot@users.noreply.gitlab.example"
+    - git add translations/ .babelhub.lock.json
+    - git commit -m "chore(i18n): synchronizacja tłumaczeń z BabelHub"
+    # ZMIEŃ 3/3: `I18N_BOT_TOKEN` to **maskowana** zmienna projektu (Project → Settings → CI/CD
+    # → Variables) z tokenem dostępu o zakresie `write_repository`. Token joba GitLaba
+    # (`CI_JOB_TOKEN`) tu nie działa: nie ma prawa wypychać commitów.
+    - git push "https://oauth2:${I18N_BOT_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" "HEAD:${CI_COMMIT_REF_NAME}"

@@ -1,0 +1,54 @@
+{
+    "name": "babelhub/cli",
+    "description": "BabelHub CLI — send the keys your code uses, pull approved catalogs back, and gate a pull request in CI",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["i18n", "localization", "translation", "cli", "ci", "babelhub"],
+    "require": {
+        "php": "^8.3",
+        "ext-curl": "*",
+        "ext-json": "*",
+        "symfony/console": "^7.4",
+        "symfony/yaml": "^7.4"
+    },
+    "require-dev": {
+        "phpstan/phpstan": "^2.2",
+        "phpunit/phpunit": "^11.0",
+        "squizlabs/php_codesniffer": "^4.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "BabelHub\\Cli\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
+    },
+    "bin": ["bin/babelhub"],
+    "scripts": {
+        "test": "phpunit",
+        "stan": "phpstan analyse --no-progress",
+        "cs": "phpcs",
+        "cs:fix": "phpcbf",
+        "check": [
+            "@test",
+            "@stan",
+            "@cs"
+        ],
+        "phar": "php -d phar.readonly=0 build-phar.php"
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "extra": {
+        "comment": [
+            "Ten pakiet byl wcześniej katalogiem `cli/` w monorepo serwisu BabelHub (Fala 1, pozycja 1.11).",
+            "Wydzielenie jest w manifestcie widoczne w trzech miejscach, ktore w monorepo wygladaly inaczej:",
+            "`bin` wskazuje plik WEWNATRZ pakietu (wczesniej `../bin/babelhub`, czyli sciezka poza pakietem,",
+            "ktorej Composer nie ma jak zainstalowac), autoload mapuje `src/` w korzeniu, a skrypt budujacy",
+            "binarke (`build-phar.php`) lezy w korzeniu i korzysta z vendora tego pakietu, nie serwisu."
+        ]
+    }
+}

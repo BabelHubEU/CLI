@@ -1,0 +1,12 @@
+# Artefakty lokalne CLI.
+#
+# `babelhub.phar` jest **artefaktem wydania**, nie źródłem: powstaje z `src/` tego repozytorium
+# i vendora (`php -d phar.readonly=0 build-phar.php`), a wydanie dołącza plik jako asset.
+# Trzymanie go w repozytorium znaczyłoby megabajt binariów w każdym commicie i dwa źródła prawdy
+# o tym, co jest w środku.
+/babelhub.phar
+
+/vendor/
+/.phpunit.cache/
+.idea/
+.vscode/

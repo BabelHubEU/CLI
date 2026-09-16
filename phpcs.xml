@@ -1,0 +1,56 @@
+<?xml version="1.0"?>
+<!--
+    PHPCS — konwencja kodu CLI.
+
+    Standard: **PSR-12**, ten sam co w serwisie, żeby kod przenoszony w obie strony nie niósł
+    dwóch stylów. Wyjątki są wypisane niżej razem z powodem, a nie domyślne.
+-->
+<ruleset name="BabelHub CLI">
+    <description>PSR-12 z wyjątkami opisanymi w komentarzach.</description>
+
+    <file>src</file>
+    <file>bin</file>
+    <file>tests</file>
+    <!-- Skrypt budujący binarkę jest kodem wykonywalnym, nie narzędziem deweloperskim. -->
+    <file>build-phar.php</file>
+    <!--
+        **Wejście CLI musi być wskazane wprost, inaczej bramka go nie widzi.** `<file>bin</file>`
+        plus `extensions=php` znaczy „pliki .php w tym katalogu”, a `bin/babelhub` rozszerzenia
+        nie ma (bo takiego pliku wymaga `bin` w Composera i `#!/usr/bin/env php`). Efekt był
+        zmierzony, nie przewidziany: bramka raportowała 93 sprawdzone pliki, gdy plików `.php`
+        jest dokładnie 93 — czyli wejście CLI, jedyny plik, który użytkownik uruchamia, nie
+        przechodził ani konwencji, ani analizy. To ta sama klasa cichego wyjątku co `*/var/*`
+        w absolutnym wzorcu wykluczenia („No files were checked” = sukces przy zerze plików).
+    -->
+    <file>bin/babelhub</file>
+
+    <!--
+        Wzorce wykluczeń są **relatywne** (`type="relative"`). Absolutny `*/var/*` wykluczyłby
+        w kontenerze wszystko, bo projekt leży w `/var/www/html` — PHPCS odpowiada wtedy
+        „No files were checked”, czyli **sukces przy zerowej liczbie sprawdzonych plików**.
+        Ta pułapka kosztowała już raz pół dnia w serwisie.
+    -->
+    <exclude-pattern type="relative">^vendor/</exclude-pattern>
+    <exclude-pattern type="relative">^var/</exclude-pattern>
+
+    <arg name="basepath" value="."/>
+    <arg name="colors"/>
+    <arg name="parallel" value="8"/>
+    <arg name="extensions" value="php"/>
+    <!-- Ostrzeżenia też blokują: „warning, który nie blokuje” to warning, który nikt nie naprawi. -->
+    <arg value="ps"/>
+
+    <rule ref="PSR12"/>
+
+    <!--
+        Długość linii: PSR-12 nie ma twardego limitu (120 znaków to zalecenie), a komentarze
+        w tym projekcie są po polsku i tłumaczą decyzje — polskie zdanie jest o ~15% dłuższe.
+        Próg ostrzegawczy 160, twardy 200; ostrzeżenia kończą się kodem wyjścia 1.
+    -->
+    <rule ref="Generic.Files.LineLength">
+        <properties>
+            <property name="lineLimit" value="160"/>
+            <property name="absoluteLineLimit" value="200"/>
+        </properties>
+    </rule>
+</ruleset>

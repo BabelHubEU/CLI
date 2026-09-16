@@ -1,0 +1,36 @@
+# PHPStan — statyczna analiza kodu CLI.
+#
+# Po co to w repozytorium, które ma własną bramkę: CLI jest jedyną częścią produktu, którą klient
+# instaluje **u siebie**, i jedyną, która działa w trzech światach (repozytorium, pakiet
+# Composera, binarka PHAR). Testy sprawdzają zachowanie, PHPStan rzeczy, których test nie widzi,
+# bo dana ścieżka nigdy się nie wykonała — brakującą gałąź `null`, zły typ argumentu, literówkę
+# w metodzie wołanej tylko przy błędzie.
+#
+# Poziom 8 to najwyższy poziom analizy; obniżony poziom to decyzja, do której nikt nie wraca.
+parameters:
+    level: 8
+    paths:
+        - src
+        - bin
+        - tests
+        # Skrypt budujący binarkę leży w korzeniu, więc musi być wskazany wprost — PHPStan nie
+        # skanuje korzenia „przy okazji”, a to właśnie on ma najwięcej styku ze ścieżkami.
+        - build-phar.php
+    excludePaths:
+        - vendor
+        # W serwisie jest tu jeszcze `var/` (cache, logi, zrzuty). CLI nie ma katalogu
+        # uruchomieniowego — trzyma dane u użytkownika (`~/.config/babelhub/`, pliki projektu),
+        # więc wykluczenie nieistniejącej ścieżki wywracałoby analizę komunikatem
+        # „neither a directory, nor a file path, nor a fnmatch pattern”.
+    # Ścieżki zgłaszane jako błędy krytyczne: brak klasy, brak metody, zła liczba argumentów.
+    reportUnmatchedIgnoredErrors: true
+
+    # **To ustawienie jest przeniesione z serwisu i bez niego CLI nie przechodzi własnej bramki**
+    # (7 błędów: `Offset 'pulled_at' … always exists and is not nullable`, `array_values()` na
+    # liście, `assertIsArray()` na typie z PHPDoc). Powód nie jest kosmetyczny: CLI czyta swoje
+    # dane **z zewnątrz procesu** — `.babelhub.lock.json`, `.babelhub.yml`, odpowiedzi serwisu —
+    # a PHPDoc opisuje ich **oczekiwany** kształt, nie gwarancję. Plik locka może pochodzić
+    # z starszej wersji CLI, konfiguracja może być ręcznie dopisana, odpowiedź może przyjść
+    # z innego wdrożenia. Defensywne `??` w takim miejscu jest poprawne, a analiza, która każe
+    # je usunąć, wymusiłaby kod, który wywala się na pierwszym starszym pliku u użytkownika.
+    treatPhpDocTypesAsCertain: false

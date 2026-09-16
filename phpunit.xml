@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         colors="true"
+         cacheDirectory=".phpunit.cache"
+         failOnWarning="true">
+    <!--
+        `failOnWarning="true"` jest tu **decyzją przeniesioną z serwisu**, nie kopią konfiguracji:
+        deprecation z biblioteki albo z własnego kodu przewraca wtedy przebieg zamiast drukować
+        ostrzeżenie, którego nikt nie czyta. W tym projekcie ostrzeżenie już raz ukryło realny
+        problem (`Application::add()` w Symfony Console) i wyszło dopiero wtedy, gdy stało się
+        błędem.
+    -->
+    <testsuites>
+        <!--
+            `Cli` — zachowanie komend: kod wyjścia, rozdział `stdout` od `stderr`, pliki, które
+            CLI zostawia na dysku. To **jest** produkt w tej kategorii (kontrakt kodów wyjścia),
+            a nie szczegół implementacji.
+        -->
+        <testsuite name="Cli">
+            <directory>tests/Cli</directory>
+        </testsuite>
+        <!--
+            `Contract` — fragmenty CI (`examples/ci/`) porównane z **prawdziwym** CLI: każde
+            polecenie istnieje, każda flaga jest wypisana w pomocy komendy, bramka nie jest
+            wyciszona, a token nie trafia do pliku. Gotowy fragment starzeje się szybciej niż
+            cokolwiek innego, bo nikt go nie uruchamia u siebie — dlatego jedzie razem z CLI,
+            a nie zostaje w repozytorium serwisu.
+        -->
+        <testsuite name="Contract">
+            <directory>tests/Contract</directory>
+        </testsuite>
+    </testsuites>
+</phpunit>
