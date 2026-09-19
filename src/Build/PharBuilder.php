@@ -339,7 +339,16 @@ final readonly class PharBuilder
 
         // Wygenerowany przez `build-phar.php` (BabelHub CLI). Ścieżki są **względne wobec
         // archiwum**, żeby binarka działała na każdej maszynie, a nie tylko tam, gdzie powstała.
-        $base = 'phar://' . basename(Phar::running(false));
+        //
+        // **Adresujemy archiwum aliasem, nie nazwą pliku.** `Phar::running(false)` zwraca nazwę,
+        // pod jaką plik leży u użytkownika — a tej nie kontrolujemy: przeglądarka potrafi zapisać
+        // pobranie jako `babelhub(1).phar`, a człowiek nazwać je po swojemu. Wcześniej stało tu
+        // `'phar://' . basename(Phar::running(false))`, co działało **wyłącznie** wtedy, gdy plik
+        // nazywał się `babelhub.phar` (bo tylko taki alias rejestruje `Phar::mapPhar()` w stubie);
+        // pod inną nazwą binarka kończyła się `phar error: invalid url or non-existent phar`.
+        // Alias z `mapPhar()` działa niezależnie od nazwy pliku — i o to chodzi w pliku, który
+        // ktoś pobiera, a nie buduje.
+        $base = __BASE__;
 
         $classmap = __CLASSMAP__;
         $psr4 = __PSR4__;
@@ -378,8 +387,13 @@ final readonly class PharBuilder
         PHP;
 
         return str_replace(
-            ['__CLASSMAP__', '__PSR4__', '__FILES__'],
-            [var_export($classmap, true), var_export($psr4, true), var_export($files, true)],
+            ['__CLASSMAP__', '__PSR4__', '__FILES__', '__BASE__'],
+            [
+                var_export($classmap, true),
+                var_export($psr4, true),
+                var_export($files, true),
+                var_export('phar://' . self::ARCHIVE_NAME, true),
+            ],
             $template,
         );
     }
@@ -414,18 +428,23 @@ final readonly class PharBuilder
 
     private function stub(): string
     {
-        return <<<'PHP'
+        $template = <<<'PHP'
         #!/usr/bin/env php
         <?php
 
-        // Stub PHAR-a: mapuje archiwum i uruchamia **ten sam** `bin/babelhub`, który działa
-        // w repozytorium i po `composer global require`.
-        Phar::mapPhar('babelhub.phar');
+        // Stub PHAR-a: mapuje archiwum (pod aliasem `__ARCHIVE__`) i uruchamia **ten sam**
+        // `bin/babelhub`, który działa w repozytorium i po `composer global require`.
+        //
+        // Alias jest tu po to, żeby binarka działała pod **każdą** nazwą, jaką nada jej
+        // użytkownik — i z tego samego aliasu korzysta wygenerowany autoloader w archiwum.
+        Phar::mapPhar('__ARCHIVE__');
 
-        require 'phar://babelhub.phar/bin/babelhub';
+        require 'phar://__ARCHIVE__/bin/babelhub';
 
         __HALT_COMPILER();
         PHP;
+
+        return str_replace('__ARCHIVE__', self::ARCHIVE_NAME, $template);
     }
 
     /** @return list<array<string, mixed>> */

@@ -122,6 +122,43 @@ final class PharBuildTest extends TestCase
     }
 
     /**
+     * Binarka działa pod **każdą** nazwą pliku — bo tak wygląda jej życie u użytkownika.
+     *
+     * Plik z wydania rzadko zachowuje nazwę, którą mu daliśmy: przeglądarka potrafi zapisać
+     * pobranie jako `babelhub(1).phar`, a człowiek nazwać je po swojemu. Stub mapuje więc alias
+     * (`Phar::mapPhar()`), a autoloader w archiwum adresuje się **tym aliasem** — wcześniej
+     * adresował się `basename(Phar::running(false))`, czyli nazwą pliku, i pod inną nazwą
+     * kończył się `phar error: invalid url or non-existent phar`.
+     *
+     * Ten test jest tu, bo poprzednie **nie mogły** tego złapać: wszystkie budowały plik o nazwie
+     * `babelhub.phar`, czyli dokładnie tej, przy której wadliwe `basename()` przypadkiem działało.
+     * Wada wyszła dopiero z pobrania opublikowanego assetu pod zmienioną nazwą.
+     */
+    public function testTheBinaryRunsUnderADifferentFileName(): void
+    {
+        $renamed = $this->root . '/babelhub-cli-pobrany(1).phar';
+        $result = $this->buildProcess(withReadonlyOff: true, output: $renamed);
+
+        self::assertSame(0, $result['code'], $result['stderr']);
+        self::assertFileExists($renamed);
+
+        $outside = sys_get_temp_dir() . '/babelhub-phar-renamed-' . bin2hex(random_bytes(6));
+        mkdir($outside, 0777, true);
+
+        try {
+            $version = $this->process([PHP_BINARY, $renamed, '--version'], $outside);
+
+            self::assertSame(0, $version['code'], $version['stderr']);
+            self::assertStringContainsString('BabelHub CLI ' . Version::VALUE, $version['stdout']);
+
+            $list = $this->process([PHP_BINARY, $renamed, 'list', '--format=json'], $outside);
+            self::assertSame(0, $list['code'], $list['stderr']);
+        } finally {
+            $this->removeDirectory($outside);
+        }
+    }
+
+    /**
      * Kontrola lokalna w binarni: skaner kodu i parser konfiguracji muszą działać **bez serwera**.
      * `--fail-on=warning` daje kod `6`, a domyślne `--fail-on=error` — `0`, bo heurystyka nie
      * blokuje merge'a (ta sama reguła co w repozytorium, patrz `AGENTS.md`).
@@ -197,7 +234,7 @@ final class PharBuildTest extends TestCase
     }
 
     /** @return array{code: int, stdout: string, stderr: string} */
-    private function buildProcess(bool $withReadonlyOff): array
+    private function buildProcess(bool $withReadonlyOff, ?string $output = null): array
     {
         $command = [PHP_BINARY];
         if ($withReadonlyOff) {
@@ -206,7 +243,7 @@ final class PharBuildTest extends TestCase
         }
 
         $command[] = dirname(__DIR__, 2) . '/build-phar.php';
-        $command[] = $this->phar;
+        $command[] = $output ?? $this->phar;
 
         return $this->process($command, $this->root);
     }
