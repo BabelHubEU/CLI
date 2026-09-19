@@ -59,7 +59,7 @@ wydanie dołącza ją jako asset, a repozytorium zostaje źródłem.
 {
   "project": "learnhub",
   "source_locale": "en_GB",
-  "files": { "pattern": "translations/messages.{lang}.php", "format": "php" },
+  "files": { "pattern": "translations/messages.{lang}.php", "format": "php", "root_key": null },
   "scan": { "paths": ["src", "templates", "config"] }
 }
 ```
@@ -74,6 +74,51 @@ pliku i ostatni wygrał. Domyślne `scan.paths` dopasowują się do katalogów, 
 naprawdę istnieją (a gdy nie ma żadnego z nich, skanujemy całość — pomijając `vendor`,
 `node_modules` i cache).
 
+#### Gdy komunikaty mieszkają pod kluczem: `files.root_key`
+
+Część projektów (i sam BabelHub w eksporcie katalogu) trzyma teksty **w kopercie** — dokument ma
+pola opisowe, a mapa tłumaczeń siedzi pod jednym z nich:
+
+```json
+{
+  "locale": "pl_PL",
+  "translations": { "nav.title": "Menu", "nav.sub": "Podmenu" }
+}
+```
+
+Dla takiego pliku trzeba powiedzieć wprost, gdzie są komunikaty:
+
+```yaml
+files:
+  pattern: "resources/translations/bootstrap.{lang}.json"
+  format: json
+  root_key: translations
+```
+
+**Dlaczego to deklaracja, a nie wykrywanie.** Kształtu nie da się bezpiecznie zgadnąć: plik może
+mieć zwykłą przestrzeń nazw o tej samej nazwie (`{"translations": {"save": "Zapisz"}}` to dwa
+różne światy), a pomyłka jest cicha w **obie** strony — `push` wysyła wtedy klucze
+`translations.…` i `locale` (czyli tworzy w serwisie klucze, których nikt nie napisał w kodzie),
+a `pull` dopisuje drugą kopię katalogu **obok** starej, bo `translations` jest dla niego
+przestrzenią nazw. Plik rośnie przy każdym przebiegu, a aplikacja klienta — która czyta dokładnie
+`translations` jako płaską mapę tekstów — przestaje widzieć tłumaczenia. Wszystkie bramki są przy
+tym zielone, bo liczba kluczy w katalogu się zgadza.
+
+Co `root_key` zmienia w zachowaniu:
+
+* **odczyt** (`push`, plik źródłowy) bierze teksty z mapy pod tym kluczem — `locale` i inne pola
+  rodzeństwa nie stają się kluczami;
+* **zapis** (`pull`) aktualizuje tę samą mapę, a rodzeństwo klucza (`locale`, `meta`, …) wraca do
+  pliku **nietknięte i w swojej kolejności**; `locale`, jeśli jest, jest ustawiane na zapisywany
+  język, żeby plik nie kłamał o sobie;
+* **kształt w środku** koperty (płasko czy zagnieżdżone, wcięcia, końce linii) wykrywamy z pliku
+  tak samo, jak bez koperty (1.16b);
+* **nowy plik** powstaje w tym kształcie (`locale` + klucz z mapą), a plik, który koperty nie ma,
+  zostaje nią owiniony — deklaracja z konfiguracji wygrywa z tym, co widać w pliku, dokładnie jak
+  `sort` i `write_nested`;
+* `root_key` to **jeden klucz najwyższego poziomu**: kropka, spacja i placeholder są odrzucane
+  jako błąd konfiguracji (kod `2`).
+
 ### `.babelhub.yml` — ten sam plik, czytelniejszy dla zespołu
 
 `babelhub init --config=yaml` zapisuje `.babelhub.yml`; oba formaty są równoważne, a CLI
@@ -87,6 +132,7 @@ source_locale: en_GB
 files:
   pattern: "translations/messages.{lang}.php"
   format: php
+  root_key: null                  # np. translations: komunikaty pod kluczem najwyższego poziomu
 
 scan:
   paths: [src, templates]
@@ -281,6 +327,7 @@ dopiero w aplikacji.
 files:
   pattern: "translations/{lang}/{ns}.json"   # {lang} = język, {ns} = przestrzeń nazw klucza
   format: json
+  root_key: null          # np. translations = komunikaty pod kluczem najwyższego poziomu
 download:
   locales: [pl_PL]        # puste = wszystkie języki projektu
   sort: file              # file (domyślnie) albo key

@@ -29,6 +29,14 @@ use RuntimeException;
  * tej kategorii po cichu psują teksty z apostrofem („It's done”) i ze znakiem nowej linii —
  * a błąd widać dopiero w aplikacji, nie w podglądzie.
  *
+ * **Koperta (`files.root_key`) jest deklaracją, nie stylem** — i to jest odpowiedź na kształt,
+ * w którym katalog trzyma sam serwis: `{"locale": "pl_PL", "translations": {"klucz": "tekst"}}`.
+ * Bez niej `translations` jest dla nas przestrzenią nazw, więc `push` czyta klucze
+ * `translations.…`, a `pull` dopisuje drugą kopię katalogu **obok** starej — plik rośnie,
+ * a aplikacja klienta (która czyta dokładnie `translations` jako płaską mapę) przestaje
+ * widzieć tłumaczenia. Kształt deklaruje projekt w `.babelhub.yml`, a my czytamy i piszemy
+ * w nim: rodzeństwo klucza wraca nietknięte, a `locale` — jeśli jest — mówi prawdę o języku.
+ *
  * **`include` przy czytaniu PHP jest świadomym zaufaniem do własnego repozytorium.** Tak trzyma
  * tłumaczenia cały ekosystem PHP (Laravel, Symfony), a plik jest kodem projektu, który i tak
  * wykonuje się przy każdym żądaniu aplikacji. Nie jest to „wykonywanie obcego kodu”: CLI
@@ -48,13 +56,16 @@ final readonly class LocaleFile
      * w jednym słowniku niezależnie od tego, jak projekt trzyma je w pliku, a rozpoznanie
      * „ten plik jest zagnieżdżony” to jedyny sposób, żeby po `pull` nie zmienić jego struktury.
      *
+     * `$rootKey` to ten sam klucz, który projekt deklaruje w `files.root_key`; bez niego
+     * komunikaty są całym dokumentem (dotychczasowe zachowanie).
+     *
      * @return array<string, string>
      *
      * @throws RuntimeException gdy plik jest nieczytelny albo nie zwraca tablicy `klucz => tekst`
      */
-    public function read(string $path): array
+    public function read(string $path, ?string $rootKey = null): array
     {
-        return $this->parse($path)['messages'];
+        return $this->parse($path, $rootKey)['messages'];
     }
 
     /**
@@ -66,9 +77,15 @@ final readonly class LocaleFile
      * dokładnie ten rodzaj uszkodzenia, który trafia do commita, bo „plik się zmienił”.
      *
      * @param array<string, string> $messages
+     * @param string|null $locale język, którym **jest** ten plik — trafia do pola `locale`
+     *        w kopercie, żeby plik nie kłamał o sobie (nazwa pliku już to mówi)
      */
-    public function write(string $path, array $messages, LocaleWriteOptions $options = new LocaleWriteOptions()): void
-    {
+    public function write(
+        string $path,
+        array $messages,
+        LocaleWriteOptions $options = new LocaleWriteOptions(),
+        ?string $locale = null,
+    ): void {
         $directory = dirname($path);
         if (!is_dir($directory) && !@mkdir($directory, 0777, true) && !is_dir($directory)) {
             throw new CliIoException(sprintf('Nie mogę utworzyć katalogu %s.', $directory));
@@ -76,7 +93,7 @@ final readonly class LocaleFile
 
         $style = $this->styleOf($path, $options);
         $merged = $this->merge($messages, $style, $options);
-        $contents = $this->render($merged, $style, $options);
+        $contents = $this->render($merged, $style, $options, $locale);
 
         $temporary = $path . '.tmp';
         if (file_put_contents($temporary, $contents) === false) {
@@ -110,20 +127,32 @@ final readonly class LocaleFile
         }
 
         try {
-            $parsed = $this->parse($path);
+            $parsed = $this->parse($path, $options->rootKey);
         } catch (RuntimeException) {
             return LocaleFileStyle::defaults($options->nested);
         }
 
-        return $this->styleOfRaw($raw, $parsed['messages'], $parsed['nested'], $parsed['order']);
+        return $this->styleOfRaw(
+            $raw,
+            $parsed['messages'],
+            $parsed['nested'],
+            $parsed['order'],
+            $parsed['envelope'],
+        );
     }
 
     /**
      * @param array<string, string> $values
      * @param list<string> $order
+     * @param array<string, mixed> $envelope
      */
-    private function styleOfRaw(string $raw, array $values, bool $nested, array $order): LocaleFileStyle
-    {
+    private function styleOfRaw(
+        string $raw,
+        array $values,
+        bool $nested,
+        array $order,
+        array $envelope = [],
+    ): LocaleFileStyle {
         return new LocaleFileStyle(
             eol: $this->detectEol($raw),
             finalNewline: str_ends_with($raw, "\n"),
@@ -133,6 +162,7 @@ final readonly class LocaleFile
             longArraySyntax: $this->format !== 'json' && preg_match('/\breturn\s+array\s*\(/', $raw) === 1,
             order: $order,
             values: $values,
+            envelope: $envelope,
         );
     }
 
@@ -203,13 +233,23 @@ final readonly class LocaleFile
     /**
      * @param array<string, string> $messages
      */
-    private function render(array $messages, LocaleFileStyle $style, LocaleWriteOptions $options): string
-    {
+    private function render(
+        array $messages,
+        LocaleFileStyle $style,
+        LocaleWriteOptions $options,
+        ?string $locale,
+    ): string {
         $nested = $style->nestedWith($options);
+        /** @var array<string, mixed> $payload */
+        $payload = $nested ? $this->nest($messages) : $messages;
+
+        if ($options->rootKey !== null) {
+            $payload = $this->wrap($style, $options->rootKey, $payload, $locale);
+        }
 
         $contents = $this->format === 'json'
-            ? $this->renderJson($messages, $nested, $style)
-            : $this->renderPhp($messages, $nested, $style);
+            ? $this->renderJson($payload, $style)
+            : $this->renderPhp($payload, $style);
 
         if ($style->eol !== "\n") {
             $contents = str_replace("\n", $style->eol, $contents);
@@ -219,12 +259,54 @@ final readonly class LocaleFile
     }
 
     /**
-     * @param array<string, string> $messages
+     * Komunikaty pod kluczem z `files.root_key` — czyli dokument w kształcie, w jakim trzyma go
+     * sam serwis (`GET …/export/{locale}.json`) i w jakim czytają go aplikacje klientów.
+     *
+     * Trzy reguły, każda z powodem:
+     *
+     * 1. **Rodzeństwo klucza wraca nietknięte i w swojej kolejności** — `meta`, `_comment`,
+     *    cokolwiek tam jest: to nie nasze pole, a `pull` nie jest właścicielem tego pliku.
+     * 2. **`locale` mówi prawdę** — jeśli jest rodzeństwem, ustawiamy je na zapisywany język.
+     *    To jedyne pole, o którym *wiemy*, czym jest, a plik `bootstrap.pl_PL.json` z `"locale":
+     *    "en_GB"` w środku to kłamstwo, które przeżyje każdy przegląd kodu.
+     * 3. **Nowy plik dostaje `locale` przed kluczem** — kształt z dokumentacji projektu, więc
+     *    pierwszy `pull` nie tworzy pliku, który wygląda inaczej niż reszta repozytorium.
+     *
+     * @param array<string, mixed> $payload
+     *
+     * @return array<string, mixed>
      */
-    private function renderJson(array $messages, bool $nested, LocaleFileStyle $style): string
+    private function wrap(LocaleFileStyle $style, string $rootKey, array $payload, ?string $locale): array
     {
-        $payload = $nested ? $this->nest($messages) : $messages;
+        $document = [];
+        $placed = false;
 
+        foreach ($style->envelope as $key => $value) {
+            if ($key === $rootKey) {
+                $document[$key] = $payload;
+                $placed = true;
+                continue;
+            }
+
+            $document[$key] = $key === 'locale' && $locale !== null && is_string($value) ? $locale : $value;
+        }
+
+        if ($placed) {
+            return $document;
+        }
+
+        if ($locale === null) {
+            return [$rootKey => $payload];
+        }
+
+        return ['locale' => $locale, $rootKey => $payload];
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private function renderJson(array $payload, LocaleFileStyle $style): string
+    {
         $encoded = json_encode(
             $payload,
             JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
@@ -326,12 +408,10 @@ final readonly class LocaleFile
      * i znaków nowej linii bez pisania własnego escapera — a to jest miejsce, w którym własna
      * implementacja cicho psuje teksty z apostrofem („It's done”) albo z `\n`.
      *
-     * @param array<string, string> $messages
+     * @param array<string, mixed> $payload
      */
-    private function renderPhp(array $messages, bool $nested, LocaleFileStyle $style): string
+    private function renderPhp(array $payload, LocaleFileStyle $style): string
     {
-        $payload = $nested ? $this->nest($messages) : $messages;
-
         $open = $style->longArraySyntax ? 'array(' : '[';
         $close = $style->longArraySyntax ? ')' : ']';
 
@@ -377,11 +457,18 @@ final readonly class LocaleFile
     /**
      * Plik → płaska mapa plus to, co o strukturze trzeba wiedzieć.
      *
-     * @return array{messages: array<string, string>, nested: bool, order: list<string>}
+     * `$rootKey` (z `files.root_key`) wskazuje klucz najwyższego poziomu, pod którym mieszkają
+     * komunikaty. Gdy plik go ma, osobno wraca **cały dokument** — po to, żeby zapis odtworzył
+     * rodzeństwo klucza (`locale`, `meta`, …) razem z jego kolejnością. Gdy pliku jeszcze nie ma
+     * albo nie ma w nim tego klucza, dokument jest po prostu mapą komunikatów i zapis owinie go
+     * w kopertę: deklaracja z konfiguracji wygrywa z tym, co widać w pliku — tak samo jak `sort`
+     * i `write_nested`.
+     *
+     * @return array{messages: array<string, string>, nested: bool, order: list<string>, envelope: array<string, mixed>}
      *
      * @throws RuntimeException
      */
-    private function parse(string $path): array
+    private function parse(string $path, ?string $rootKey = null): array
     {
         if (!is_file($path)) {
             throw new RuntimeException(sprintf('Nie ma pliku %s.', $path));
@@ -389,12 +476,30 @@ final readonly class LocaleFile
 
         $data = $this->format === 'json' ? $this->parseJson($path) : $this->parsePhp($path);
 
+        $envelope = [];
+        if ($rootKey !== null && array_key_exists($rootKey, $data)) {
+            $inner = $data[$rootKey];
+            if (!is_array($inner)) {
+                // Koperta zadeklarowana w konfiguracji, a w pliku coś innego: to nie jest
+                // „brak koperty”, to plik w innym kształcie niż mówi konfiguracja. Milczenie
+                // skończyłoby się nadpisaniem treści, której nie zrozumieliśmy.
+                throw new RuntimeException(sprintf(
+                    'Klucz "%s" w %s nie jest obiektem z tłumaczeniami, a tak mówi "files.root_key".',
+                    $rootKey,
+                    $path,
+                ));
+            }
+
+            $envelope = $data;
+            $data = $inner;
+        }
+
         $messages = [];
         $order = [];
         $nested = false;
         $this->flatten($data, '', $path, $messages, $order, $nested);
 
-        return ['messages' => $messages, 'nested' => $nested, 'order' => $order];
+        return ['messages' => $messages, 'nested' => $nested, 'order' => $order, 'envelope' => $envelope];
     }
 
     /** @return array<mixed> */

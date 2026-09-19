@@ -366,6 +366,165 @@ final class LocaleFileTest extends TestCase
         );
     }
 
+    // -----------------------------------------------------------------
+    // Koperta: `files.root_key` (1.20)
+    // -----------------------------------------------------------------
+
+    /**
+     * **Regresja z wdrożenia LearnHub.** Plik `bootstrap.{lang}.json` trzyma katalog w kopercie
+     * (`{"locale": …, "translations": {…}}`), bo tak czyta go aplikacja klienta. Bez
+     * `files.root_key` CLI widziało w `translations` zwykłą przestrzeń nazw: `pull` dopisywał
+     * drugą kopię katalogu **obok** starej (89 kluczy → 181 liści), a `push` czytał klucze
+     * `translations.…`. Ten test zapisuje dwa razy i pilnuje, że dokument ma dokładnie dwa pola,
+     * a mapa w kopercie jest aktualizowana — nie powiększana.
+     */
+    public function testWritingTwiceIntoAnEnvelopeDoesNotAppendASecondCopyOfTheCatalog(): void
+    {
+        $path = $this->root . '/translations/bootstrap.pl_PL.json';
+        mkdir($this->root . '/translations', 0777, true);
+        file_put_contents(
+            $path,
+            "{\n    \"locale\": \"pl_PL\",\n    \"translations\": {\n        \"learning.lesson.ready\": \"Gotowe\"\n    }\n}\n",
+        );
+
+        $file = new LocaleFile(ProjectConfig::FORMAT_JSON);
+        $options = new LocaleWriteOptions(rootKey: 'translations');
+        $messages = ['learning.lesson.ready' => 'Gotowe', 'nav.title' => 'Menu'];
+
+        $file->write($path, $messages, $options, 'pl_PL');
+        $file->write($path, $messages, $options, 'pl_PL');
+
+        /** @var array<string, mixed> $decoded */
+        $decoded = json_decode((string) file_get_contents($path), true, 512, JSON_THROW_ON_ERROR);
+
+        self::assertSame(
+            ['locale', 'translations'],
+            array_keys($decoded),
+            'koperta zostaje kopertą — bez drugiej kopii katalogu na wierzchu dokumentu',
+        );
+        self::assertSame(
+            ['learning.lesson.ready' => 'Gotowe', 'nav.title' => 'Menu'],
+            $decoded['translations'],
+            'mapa w kopercie jest aktualizowana, nie dopisywana obok',
+        );
+        self::assertSame($messages, $file->read($path, 'translations'), 'odczyt widzi dokładnie te klucze');
+        self::assertSame('pl_PL', $decoded['locale'], '`locale` mówi prawdę o języku pliku');
+
+        $expected = "{\n    \"locale\": \"pl_PL\",\n    \"translations\": {\n"
+            . "        \"learning.lesson.ready\": \"Gotowe\",\n        \"nav.title\": \"Menu\"\n    }\n}\n";
+
+        self::assertSame(
+            $expected,
+            (string) file_get_contents($path),
+            'drugi zapis nie zmienia już niczego — to warunek pustego diffu w CI',
+        );
+    }
+
+    /**
+     * Wcięcia, końce linii i kształt **w środku** koperty są własnością pliku, tak samo jak
+     * w pliku bez koperty: projekt z zagnieżdżonym JSON-em po `pull` ma dostać zagnieżdżony JSON,
+     * a nie płaskie klucze z kropkami.
+     */
+    public function testTheEnvelopeKeepsTheNestedShapeInsideIt(): void
+    {
+        $path = $this->root . '/nested.envelope.json';
+        file_put_contents($path, "{\n    \"translations\": {\n        \"nav\": {\n            \"title\": \"Menu\"\n        }\n    }\n}\n");
+
+        (new LocaleFile(ProjectConfig::FORMAT_JSON))->write(
+            $path,
+            ['nav.title' => 'Menu', 'nav.sub' => 'Podmenu'],
+            new LocaleWriteOptions(rootKey: 'translations'),
+            'en_GB',
+        );
+
+        $raw = (string) file_get_contents($path);
+
+        self::assertStringContainsString('"translations": {', $raw);
+        self::assertStringContainsString('"nav": {', $raw, 'struktura z pliku jest zachowana');
+        self::assertStringContainsString('"sub": "Podmenu"', $raw, 'nowy klucz dochodzi w tej samej strukturze');
+        self::assertSame(
+            ['nav.title' => 'Menu', 'nav.sub' => 'Podmenu'],
+            (new LocaleFile(ProjectConfig::FORMAT_JSON))->read($path, 'translations'),
+        );
+    }
+
+    public function testANewEnvelopeFileGetsTheLocaleFieldFromTheCommand(): void
+    {
+        $path = $this->root . '/fresh.json';
+
+        (new LocaleFile(ProjectConfig::FORMAT_JSON))->write(
+            $path,
+            ['nav.title' => 'Menu'],
+            new LocaleWriteOptions(rootKey: 'translations'),
+            'pl_PL',
+        );
+
+        self::assertSame(
+            "{\n    \"locale\": \"pl_PL\",\n    \"translations\": {\n        \"nav.title\": \"Menu\"\n    }\n}\n",
+            (string) file_get_contents($path),
+            'nowy plik powstaje w kształcie, który czyta aplikacja klienta',
+        );
+    }
+
+    /**
+     * Koperta zadeklarowana, a w pliku **nie ma** tego klucza: to plik w innym kształcie, więc
+     * komunikaty są całym dokumentem i zapis je owinie. Deklaracja z konfiguracji wygrywa
+     * z tym, co widać w pliku — tak samo jak `sort` i `write_nested` — a migracja jest
+     * jednorazowym diffem, nie cichym zgubieniem tekstów.
+     */
+    public function testAFileWithoutTheDeclaredRootKeyIsWrappedInsteadOfBeingLost(): void
+    {
+        $path = $this->root . '/flat.json';
+        file_put_contents($path, "{\n    \"a.one\": \"Stare\"\n}\n");
+
+        (new LocaleFile(ProjectConfig::FORMAT_JSON))->write(
+            $path,
+            ['a.one' => 'Nowe'],
+            new LocaleWriteOptions(rootKey: 'translations'),
+            'pl_PL',
+        );
+
+        /** @var array<string, mixed> $decoded */
+        $decoded = json_decode((string) file_get_contents($path), true, 512, JSON_THROW_ON_ERROR);
+
+        self::assertSame(['locale', 'translations'], array_keys($decoded));
+        self::assertSame(['a.one' => 'Nowe'], $decoded['translations']);
+    }
+
+    public function testAPhpFileCanCarryTheEnvelopeToo(): void
+    {
+        $path = $this->root . '/messages.en_GB.php';
+        file_put_contents(
+            $path,
+            "<?php\n\nreturn [\n    'locale' => 'en_GB',\n    'translations' => [\n        'a.one' => 'One',\n    ],\n];\n",
+        );
+
+        $file = new LocaleFile(ProjectConfig::FORMAT_PHP);
+        $file->write($path, ['a.one' => 'One', 'b.two' => 'Two'], new LocaleWriteOptions(rootKey: 'translations'), 'en_GB');
+
+        $raw = (string) file_get_contents($path);
+
+        self::assertStringContainsString("'translations' => [", $raw);
+        self::assertStringContainsString("'locale' => 'en_GB'", $raw, 'rodzeństwo klucza zostaje w pliku');
+        self::assertSame(['a.one' => 'One', 'b.two' => 'Two'], $file->read($path, 'translations'));
+    }
+
+    /**
+     * Zadeklarowany klucz, który w pliku nie jest mapą: to **inny kształt niż mówi konfiguracja**.
+     * Milczenie skończyłoby się nadpisaniem treści, której nie zrozumieliśmy — a to jest jedyny
+     * błąd, którego to narzędzie nie może popełnić.
+     */
+    public function testADeclaredRootKeyThatIsNotAnObjectIsRejected(): void
+    {
+        $path = $this->root . '/broken-envelope.json';
+        file_put_contents($path, "{\n    \"translations\": \"to nie mapa\"\n}\n");
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/root_key/');
+
+        (new LocaleFile(ProjectConfig::FORMAT_JSON))->read($path, 'translations');
+    }
+
     private function removeDirectory(string $path): void
     {
         if (!is_dir($path)) {

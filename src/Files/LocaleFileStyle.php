@@ -24,12 +24,20 @@ namespace BabelHub\Cli\Files;
  * zawsze w apostrofach — i to jest jedyne świadome odstępstwo, bo własny escaper to miejsce,
  * w którym narzędzia tej kategorii po cichu psują teksty z apostrofem albo znakiem nowej linii
  * (patrz `LocaleFile`).
+ *
+ * `envelope` jest wyjątkiem potwierdzającym regułę i dlatego jest osobnym polem: to **dokument
+ * najwyższego poziomu** z pliku, gdy komunikaty mieszkają pod kluczem z `files.root_key`
+ * (`{"locale": "pl_PL", "translations": {…}}`). Trzymamy go w całości — razem z kolejnością —
+ * bo rodzeństwo klucza (`locale`, `meta`, przyszłe pola) nie jest naszą własnością, a bez niego
+ * `pull` zgubiłby je przy pierwszym zapisie.
  */
 final readonly class LocaleFileStyle
 {
     /**
      * @param list<string> $order kolejność kluczy z pliku (płaskie)
      * @param array<string, string> $values treść pliku (płaskie)
+     * @param array<string, mixed> $envelope dokument najwyższego poziomu, gdy plik ma kopertę
+     *        (`files.root_key`); puste, gdy komunikaty są całym dokumentem
      */
     public function __construct(
         public string $eol = "\n",
@@ -40,6 +48,7 @@ final readonly class LocaleFileStyle
         public bool $longArraySyntax = false,
         public array $order = [],
         public array $values = [],
+        public array $envelope = [],
     ) {
     }
 

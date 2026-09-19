@@ -587,6 +587,84 @@ final class ProjectConfigTest extends TestCase
         ], 'sort');
     }
 
+    /**
+     * `files.root_key` deklaruje, że komunikaty mieszkają pod kluczem najwyższego poziomu —
+     * i **musi** dojechać do zapisu pliku oraz do odczytu pliku źródłowego w `push`; jedno
+     * miejsce, w którym konfiguracja staje się zachowaniem, to `writeOptions()`.
+     */
+    public function testTheRootKeyIsReadAndPassedToTheWriteOptions(): void
+    {
+        $config = ProjectConfig::fromArray([
+            'project' => 'learnhub',
+            'source_locale' => 'en_GB',
+            'files' => [
+                'pattern' => 'resources/translations/bootstrap.{lang}.json',
+                'format' => ProjectConfig::FORMAT_JSON,
+                'root_key' => 'translations',
+            ],
+        ]);
+
+        self::assertSame('translations', $config->fileRootKey);
+        self::assertSame(
+            'translations',
+            $config->writeOptions()->rootKey,
+            'odczyt i zapis muszą używać tego samego klucza, inaczej `push` czyta klucze `translations.…`',
+        );
+        self::assertNull(
+            ProjectConfig::fromArray([
+                'project' => 'learnhub',
+                'source_locale' => 'en_GB',
+                'files' => ['pattern' => 'translations/messages.{lang}.php'],
+            ])->fileRootKey,
+            'brak pola znaczy „komunikaty są całym dokumentem” — dotychczasowe zachowanie',
+        );
+    }
+
+    public function testTheRootKeySurvivesASaveAndLoad(): void
+    {
+        $this->store()->save(new ProjectConfig(
+            project: 'learnhub',
+            sourceLocale: 'en_GB',
+            filePattern: 'resources/translations/bootstrap.{lang}.json',
+            fileFormat: ProjectConfig::FORMAT_JSON,
+            scanPaths: ['src'],
+            fileRootKey: 'translations',
+        ), $this->root, ProjectConfig::FILE_NAME_YAML);
+
+        $loaded = $this->store()->load();
+
+        self::assertNotNull($loaded);
+        self::assertSame('translations', $loaded->fileRootKey, 'koperta przechodzi przez YAML, którym konfiguruje się projekty');
+    }
+
+    /**
+     * Kropka i placeholder w `root_key` to nie „egzotyczna nazwa”, a pomyłka: koperta jest
+     * **jednym kluczem na wierzchu** dokumentu. Literówka w tym polu jest cicha i droga —
+     * `push` tworzy wtedy klucze `translations.…`, a `pull` dopisuje drugą kopię katalogu.
+     */
+    public function testARootKeyThatIsNotASingleTopLevelKeyIsRejected(): void
+    {
+        $this->assertRejected([
+            'project' => 'learnhub',
+            'source_locale' => 'en_GB',
+            'files' => [
+                'pattern' => 'translations/messages.{lang}.json',
+                'format' => ProjectConfig::FORMAT_JSON,
+                'root_key' => 'messages.translations',
+            ],
+        ], 'files.root_key');
+
+        $this->assertRejected([
+            'project' => 'learnhub',
+            'source_locale' => 'en_GB',
+            'files' => [
+                'pattern' => 'translations/messages.{lang}.json',
+                'format' => ProjectConfig::FORMAT_JSON,
+                'root_key' => true,
+            ],
+        ], 'files.root_key');
+    }
+
     public function testScanPathsThatAreNotAListAreRejected(): void
     {
         // Obiekt (`{"src": true}`) wygląda w JSON-ie jak tablica, ale listą nie jest.

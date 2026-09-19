@@ -195,6 +195,7 @@ final readonly class CliPull
                     $group['namespace'] === null ? $path : $config->fileFor($locale, $root, $group['namespace']),
                     $group['messages'],
                     $config->writeOptions(),
+                    $locale,
                 );
                 $written++;
             }

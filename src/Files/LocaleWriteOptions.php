@@ -18,6 +18,14 @@ namespace BabelHub\Cli\Files;
  * `sort` jest listą zamkniętą, a nie polem `true|false`: w narzędziach tej kategorii „sortowanie”
  * znaczy zwykle „alfabetycznie”, a tu chodzi o wybór między **kolejnością z serwisu** a
  * **kolejnością z pliku** — i tylko jedna z nich jest domyślna, bo tylko ona nie robi diffu.
+ *
+ * `rootKey` jest **deklaracją kształtu, nie stylem**, i dlatego siedzi tutaj, a nie w wykrytym
+ * stylu pliku: mówi, że komunikaty mieszkają pod kluczem najwyższego poziomu
+ * (`{"locale": "pl_PL", "translations": {"klucz": "tekst"}}`). Tego nie da się bezpiecznie
+ * zgadnąć — plik może mieć przestrzeń nazw o tej samej nazwie — a pomyłka jest cicha w obie
+ * strony: `push` wysłałby klucze `translations.…`, a `pull` dołożyłby drugą kopię katalogu
+ * zamiast go zaktualizować. Wykrywany zostaje **styl w środku** koperty (płasko czy
+ * zagnieżdżone), a rodzeństwo klucza (`locale`, `meta`, …) wraca do pliku nietknięte.
  */
 final readonly class LocaleWriteOptions
 {
@@ -33,6 +41,7 @@ final readonly class LocaleWriteOptions
     public function __construct(
         public bool $nested = false,
         public string $sort = self::SORT_FILE,
+        public ?string $rootKey = null,
     ) {
     }
 }

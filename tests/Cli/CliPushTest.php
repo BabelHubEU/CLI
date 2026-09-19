@@ -104,6 +104,45 @@ final class CliPushTest extends TestCase
         ], $payload['keys'] ?? null, 'partia to suma skanu i pliku źródłowego, posortowana po kluczu');
     }
 
+    /**
+     * Plik źródłowy w kopercie (`files.root_key`): teksty jadą z mapy pod `translations`,
+     * a nie jako klucze `translations.…` i `locale`.
+     *
+     * To ten sam defekt co przy `pull`, tylko groźniejszy: `push` stoi **pierwszy** w pipeline
+     * gałęzi głównej, więc bez tego jeden przebieg tworzy w serwisie kilkadziesiąt kluczy,
+     * których nikt nie napisał w kodzie — a one wracają potem do katalogu i do plików klienta.
+     */
+    public function testAnEnvelopeSourceFileIsReadFromTheRootKeyNotAsPrefixedKeys(): void
+    {
+        (new ProjectConfigStore($this->root))->save(new ProjectConfig(
+            project: 'learnhub',
+            sourceLocale: 'en_GB',
+            filePattern: 'translations/bootstrap.{lang}.json',
+            fileFormat: ProjectConfig::FORMAT_JSON,
+            scanPaths: ['src'],
+            fileRootKey: 'translations',
+        ), $this->root);
+
+        $this->writeKeys();
+        $this->write(
+            'translations/bootstrap.en_GB.json',
+            "{\n    \"locale\": \"en_GB\",\n    \"translations\": {\n        \"a.one\": \"One\",\n        \"b.two\": \"Two\"\n    }\n}\n",
+        );
+
+        $client = $this->client()->script('POST', self::SYNC_PATH, $this->syncResponse());
+
+        $result = $this->runPush([], $client);
+
+        self::assertSame(ExitCode::Success->value, $result['code']);
+
+        $payload = $client->requests[0]['payload'] ?? [];
+        self::assertSame([
+            ['key' => 'a.one', 'source' => 'One'],
+            ['key' => 'b.two', 'source' => 'Two'],
+            ['key' => 'c.three', 'source' => null],
+        ], $payload['keys'] ?? null, 'klucze z kodu plus teksty z koperty — bez `translations.…` i bez `locale`');
+    }
+
     public function testKeepMissingSwitchesOffTheRemovalFlag(): void
     {
         $this->writeFullProject();

@@ -68,7 +68,14 @@ final class InitCommandTest extends TestCase
         self::assertSame('learnhub', $config['project']);
         self::assertSame('pl_PL', $config['source_locale']);
         self::assertSame(
-            ['pattern' => 'translations/messages.{lang}.php', 'format' => ProjectConfig::FORMAT_PHP],
+            [
+                'pattern' => 'translations/messages.{lang}.php',
+                'format' => ProjectConfig::FORMAT_PHP,
+                // `null` też jedzie do pliku: plik, który pokazuje wszystkie ustawienia, uczy,
+                // że koperta (`files.root_key`) jest do ustawienia — a usunięcie linii
+                // przywraca dokładnie tę samą wartość.
+                'root_key' => null,
+            ],
             $config['files'],
         );
         self::assertSame(
@@ -258,7 +265,11 @@ final class InitCommandTest extends TestCase
 
         self::assertSame(ExitCode::Success->value, $result['code']);
         self::assertSame(
-            ['pattern' => 'lang/{lang}/messages.json', 'format' => ProjectConfig::FORMAT_JSON],
+            [
+                'pattern' => 'lang/{lang}/messages.json',
+                'format' => ProjectConfig::FORMAT_JSON,
+                'root_key' => null,
+            ],
             $this->writtenConfig()['files'] ?? null,
         );
     }

@@ -60,7 +60,10 @@ final readonly class CliPush
         $messages = [];
         $sourceFileExists = is_file($sourcePath);
         if ($sourceFileExists) {
-            $messages = (new LocaleFile($config->fileFormat))->read($sourcePath);
+            // Ten sam `files.root_key` co przy `pull`: bez niego plik w kopercie
+            // (`{"locale": …, "translations": {…}}`) daje klucze `translations.…` i `locale`
+            // — czyli `push` tworzy w serwisie śmieci, których nikt nie napisał w kodzie.
+            $messages = (new LocaleFile($config->fileFormat))->read($sourcePath, $config->fileRootKey);
         } else {
             // Brak pliku źródłowego to nie błąd: projekt może dopiero zaczynać albo trzymać
             // teksty gdzie indziej. Mówimy o tym wprost, bo bez tej informacji „wysłałem 240

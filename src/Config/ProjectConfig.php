@@ -63,7 +63,7 @@ final readonly class ProjectConfig
         'checks',
         '$schema',
     ];
-    private const ALLOWED_FILES_KEYS = ['pattern', 'format'];
+    private const ALLOWED_FILES_KEYS = ['pattern', 'format', 'root_key'];
     private const ALLOWED_SCAN_KEYS = ['paths'];
     private const ALLOWED_UPLOAD_KEYS = ['mark_missing_as_removed', 'unapprove_changed'];
     private const ALLOWED_CHECKS_KEYS = ['fail_on', 'ignore', 'run'];
@@ -75,6 +75,8 @@ final readonly class ProjectConfig
      * @param string $downloadSort kolejność kluczy w plikach (`file` albo `key`)
      * @param bool $downloadWriteNested czy pisać strukturę zagnieżdżoną w nowych plikach
      * @param string|null $downloadPostProcessCommand komenda uruchamiana po zapisaniu plików
+     * @param string|null $fileRootKey klucz najwyższego poziomu, pod którym mieszkają komunikaty
+     *        (`null` = komunikaty są całym dokumentem); patrz `LocaleWriteOptions`
      * @param list<CheckName> $checksRun kontrole uruchamiane przez `babelhub validate` bez `--check`
      * @param list<string> $checksIgnore ścieżki pomijane przez kontrolę `hardcoded-strings`
      */
@@ -93,6 +95,7 @@ final readonly class ProjectConfig
         public string $checksFailOn = self::DEFAULT_FAIL_ON,
         public array $checksRun = [CheckName::Quality],
         public array $checksIgnore = [],
+        public ?string $fileRootKey = null,
     ) {
     }
 
@@ -156,6 +159,19 @@ final readonly class ProjectConfig
             ));
         }
 
+        // `root_key` to **jeden klucz najwyższego poziomu**, nie ścieżka: kropka znaczyłaby
+        // zagnieżdżenie (a koperta jest z definicji na wierzchu), a `{lang}` byłoby placeholderem,
+        // którego tu nie podstawiamy. Literówka w tym polu jest cicha i droga — `push` wysłałby
+        // klucze z prefiksem, a `pull` dołożyłby drugą kopię katalogu obok starej — więc
+        // akceptujemy wyłącznie kształt, który da się odczytać bez zgadywania.
+        $rootKey = $files['root_key'] ?? null;
+        if ($rootKey !== null && (!is_string($rootKey) || preg_match('/^[A-Za-z_][A-Za-z0-9_-]*$/', $rootKey) !== 1)) {
+            throw new CliConfigException(
+                'Pole "files.root_key" musi być nazwą klucza najwyższego poziomu (np. "translations") albo null. '
+                . 'Kropka, spacja i placeholder nie mają tu sensu: komunikaty mieszkają pod jednym kluczem.',
+            );
+        }
+
         $scan = $data['scan'] ?? [];
         if (!is_array($scan)) {
             throw new CliConfigException('Sekcja "scan" musi być obiektem z opcjonalnym polem "paths".');
@@ -191,6 +207,7 @@ final readonly class ProjectConfig
             checksFailOn: self::failOn($data, $fileName),
             checksRun: self::checksRun($data, $fileName),
             checksIgnore: self::checksIgnore($data, $fileName),
+            fileRootKey: is_string($rootKey) ? $rootKey : null,
         );
     }
 
@@ -480,6 +497,7 @@ final readonly class ProjectConfig
             'files' => [
                 'pattern' => $this->filePattern,
                 'format' => $this->fileFormat,
+                'root_key' => $this->fileRootKey,
             ],
             'scan' => [
                 'paths' => $this->scanPaths,
@@ -541,6 +559,7 @@ final readonly class ProjectConfig
         return new LocaleWriteOptions(
             nested: $this->downloadWriteNested,
             sort: $this->downloadSort,
+            rootKey: $this->fileRootKey,
         );
     }
 

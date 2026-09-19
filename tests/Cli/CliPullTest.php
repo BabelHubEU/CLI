@@ -541,6 +541,7 @@ final class CliPullTest extends TestCase
         string $pattern = 'translations/messages.{lang}.php',
         string $sort = LocaleWriteOptions::SORT_FILE,
         bool $nested = false,
+        ?string $rootKey = null,
     ): ProjectConfig {
         return new ProjectConfig(
             project: CliWorkspace::PROJECT,
@@ -550,6 +551,7 @@ final class CliPullTest extends TestCase
             scanPaths: ['src'],
             downloadSort: $sort,
             downloadWriteNested: $nested,
+            fileRootKey: $rootKey,
         );
     }
 
@@ -635,6 +637,53 @@ final class CliPullTest extends TestCase
             3,
             $this->workspace->loadLock()?->keysFor('pl_PL'),
             'lock liczy klucze w języku, nie pliki — inaczej rozjazd liczyłby się inaczej niż zapis',
+        );
+    }
+
+    /**
+     * **Koperta katalogu: `pull` aktualizuje mapę w środku, a nie dokłada drugiej kopii obok.**
+     *
+     * To regresja z pierwszego wdrożenia LearnHub: plik `bootstrap.{lang}.json` trzyma katalog
+     * jako `{"locale": …, "translations": {…}}` (tak czyta go aplikacja klienta). Bez
+     * `files.root_key` jedno `pull` zmieniło 89 kluczy w 181 liści — treść wróciła pod
+     * `translations.*`, a `translations` przestało być płaską mapą tekstów, więc fallback
+     * aplikacji był martwy, mimo że wszystkie bramki były zielone.
+     */
+    public function testPullUpdatesTheMapInsideTheEnvelopeInsteadOfAppendingASecondCopy(): void
+    {
+        $file = 'resources/translations/bootstrap.pl_PL.json';
+        $this->workspace->write(
+            $file,
+            "{\n    \"locale\": \"pl_PL\",\n    \"translations\": {\n        \"local.only\": \"Tylko lokalnie\",\n        \"z.last\": \"Stare\"\n    }\n}\n",
+        );
+
+        $client = $this->scriptProject($this->client());
+        $this->scriptCatalog($client, 7, ['a.new' => 'Nowe', 'z.last' => 'Nowe ostatnie']);
+
+        $result = $this->runPull(
+            $client,
+            $this->config(
+                ProjectConfig::FORMAT_JSON,
+                'resources/translations/bootstrap.{lang}.json',
+                rootKey: 'translations',
+            ),
+        );
+
+        self::assertSame(ExitCode::Success->value, $result['code']);
+
+        /** @var array<string, mixed> $decoded */
+        $decoded = json_decode($this->workspace->read($file), true, 512, JSON_THROW_ON_ERROR);
+
+        self::assertSame(
+            ['locale', 'translations'],
+            array_keys($decoded),
+            'dokument ma dalej dwa pola — bez drugiej kopii katalogu na wierzchu',
+        );
+        self::assertSame('pl_PL', $decoded['locale']);
+        self::assertSame(
+            ['local.only' => 'Tylko lokalnie', 'z.last' => 'Nowe ostatnie', 'a.new' => 'Nowe'],
+            $decoded['translations'],
+            'mapa w kopercie jest aktualizowana: klucz lokalny zostaje, istniejący się zmienia, nowy dochodzi',
         );
     }
 
