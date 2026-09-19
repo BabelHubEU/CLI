@@ -147,11 +147,24 @@ final class PostProcessCommandTest extends TestCase
         $client = $this->scriptCatalog($this->client(), 11, ['a.one' => 'One']);
 
         // `sleep 30` nie istnieje w `cmd`, a `php -r 'sleep(30);'` wisi na obu systemach.
+        $started = microtime(true);
         $result = $this->runPull($client, $this->php('sleep(30);'), timeoutSeconds: 1);
+        $elapsed = microtime(true) - $started;
 
         self::assertSame(ExitCode::Failure->value, $result['code']);
         self::assertStringContainsString('przekroczył limit 1 s', $result['stderr']);
         self::assertStringContainsString('NIE przetworzone', $result['stderr']);
+
+        // **Czas jest tu asercją, nie szczegółem.** Sam komunikat i kod wyjścia przechodziły
+        // także wtedy, gdy CLI czekało na hook do końca jego pracy — na Windows 30,2 s przy
+        // limicie 1 s, bo `cmd /c` zostawał rodzicem żywego dziecka i trzymał potoki otwarte.
+        // Kontrakt brzmi „limit”, więc mierzymy limit: próg 10 s jest 10× luźniejszy od
+        // oczekiwanego ~1 s, a i tak trzy razy ostrzejszy od zachowania, które było wadą.
+        self::assertLessThan(
+            10.0,
+            $elapsed,
+            sprintf('hook z limitem 1 s zajął %.1f s — limit nie ubija drzewa procesów', $elapsed),
+        );
     }
 
     /**
