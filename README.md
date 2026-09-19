@@ -35,8 +35,8 @@ the release that still had the Windows hook-timeout defect — while `~0.1.0` re
 `0.1.x`. Measured twice with a clean cache, against Packagist and against the VCS repository:
 the narrowing belongs to Composer, not to the source of the package.
 
-**As a PHAR — one file, no Composer.** Download the asset from a [release][releases] (keep the file
-name `babelhub.phar`; see *Status*), or build it from a checkout:
+**As a PHAR — one file, no Composer.** Download the asset from a [release][releases] (any file name
+works — the binary addresses itself by the archive alias), or build it from a checkout:
 
 ```bash
 composer install
@@ -185,11 +185,6 @@ ship, which no longer configure a VCS repository. What is still open:
 
 [packagist]: https://packagist.org/packages/babelhub/cli
 
-* **the PHAR only runs under the name `babelhub.phar`** — the autoloader inside resolves its own
-  path with `basename(Phar::running(false))`, which is not the alias the stub maps, so a renamed
-  download fails with `phar error: invalid url or non-existent phar`. Found by fetching the release
-  asset under a different name; the fix is to address the archive by the alias `Phar::mapPhar()`
-  already registers;
 * **language of the messages** — the CLI still speaks Polish (the manual too); the plan tracks
   the English catalogues as an open item, and this is the channel that reaches teams abroad.
 
