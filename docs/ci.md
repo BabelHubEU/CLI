@@ -122,11 +122,10 @@ używał tokenu CI — kolejność źródeł jest jawna: `BABELHUB_TOKEN` wygryw
 
 ## Instalacja CLI w CI
 
-Repozytorium CLI jest publiczne, ale pakietu nie ma jeszcze w Packagu, więc fragmenty instalują
-CLI z repozytorium VCS:
+Pakiet jest w Packagu (`babelhub/cli`), więc fragmenty instalują go jedną linią — bez konfiguracji
+repozytorium VCS i bez żadnego sekretu do czytania źródeł:
 
 ```bash
-composer global config repositories.babelhub vcs https://gitlab.com/babelhub/cli.git
 composer global require babelhub/cli:~0.1.0 --no-interaction
 export PATH="$PATH:$(composer global config bin-dir --absolute)"
 ```
@@ -134,13 +133,14 @@ export PATH="$PATH:$(composer global config bin-dir --absolute)"
 **Constraint piszemy jako `~0.1.0`, nigdy `^0.1`** — i to nie jest kwestia gustu. Composer zawęża
 caret na wersji `0.x` do wersji dokładnej: `require babelhub/cli:^0.1` zapisuje w `composer.json`
 `0.1` (czyli „dokładnie 0.1.0”) i **instaluje `0.1.0`**, omijając późniejsze wydania z tej samej
-linii — a `0.1.0` miało defekt limitu hook-a na Windows. Zmierzone na tym repozytorium: `^0.1`
-→ `0.1.0`, `~0.1.0` → `0.1.1`. Fragment z podmienionym constraintem przepuszcza więc bramkę,
-którą chcieliśmy mieć, i to jest dokładnie ten rodzaj cichej różnicy, którego nie widać w logu.
+linii — a `0.1.0` miało defekt limitu hook-a na Windows. Zmierzone **dwa razy**: raz z repozytorium
+VCS, raz z Packagista (zachowanie należy do Composera, nie do źródła pakietu): `^0.1` → `0.1.0`,
+`~0.1.0` → `0.1.1`. Fragment z podmienionym constraintem przechodzi więc bramkę, którą chcieliśmy
+mieć, i to jest dokładnie ten rodzaj cichej różnicy, którego nie widać w logu.
 
-Po publikacji w Packagu pierwsza linia znika, a druga wystarcza. Jeśli wolisz przypiąć wersję
-w `composer.json` projektu zamiast instalacji globalnej, użyj `composer require --dev babelhub/cli`
-i wołaj `vendor/bin/babelhub` — reszta fragmentu się nie zmienia.
+Jeśli wolisz przypiąć wersję w `composer.json` projektu zamiast instalacji globalnej, użyj
+`composer require --dev babelhub/cli:~0.1.0` i wołaj `vendor/bin/babelhub` — reszta fragmentu się
+nie zmienia. Binarka bez Composera jest w wydaniach GitLaba jako asset `babelhub.phar`.
 
 ## Kody wyjścia w CI
 

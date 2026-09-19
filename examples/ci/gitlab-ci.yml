@@ -31,7 +31,8 @@ stages:
     BABELHUB_TOKEN:
       description: "Token osobisty BabelHub (zakresy: translations:read, translations:write, qa:read)."
   before_script:
-    - composer global config repositories.babelhub vcs https://gitlab.com/babelhub/cli.git
+    # Pakiet jest w Packagu. Constraint `~0.1.0`, a **nie** `^0.1`: Composer zawęża caret na
+    # wersji `0.x` do dokładnej i `^0.1` zainstalowałby `0.1.0` (wydanie z defektem limitu hook-a).
     - composer global require babelhub/cli:~0.1.0 --no-interaction
     - export PATH="$PATH:$(composer global config bin-dir --absolute)"
 

@@ -53,10 +53,10 @@ jobs:
           coverage: none
 
       - name: Zainstaluj CLI babelhub
-        # Po publikacji pakietu (Fala 1, pozycja 1.11) wystarczy druga linia. Do tego czasu
-        # pakiet instalujemy z repozytorium VCS — dlatego obie są w jednym kroku.
+        # Pakiet jest w Packagu, więc wystarczy jedna linia. Constraint piszemy jako `~0.1.0`,
+        # a **nie** `^0.1`: Composer zawęża caret na wersji `0.x` do dokładnej (`^0.1` zapisuje
+        # w `composer.json` `0.1`) i zainstalowałby `0.1.0` — wydanie z defektem limitu hook-a.
         run: |
-          composer global config repositories.babelhub vcs https://gitlab.com/babelhub/cli.git
           composer global require babelhub/cli:~0.1.0 --no-interaction
           echo "$(composer global config bin-dir --absolute)" >> "$GITHUB_PATH"
 
@@ -112,7 +112,6 @@ jobs:
 
       - name: Zainstaluj CLI babelhub
         run: |
-          composer global config repositories.babelhub vcs https://gitlab.com/babelhub/cli.git
           composer global require babelhub/cli:~0.1.0 --no-interaction
           echo "$(composer global config bin-dir --absolute)" >> "$GITHUB_PATH"
 

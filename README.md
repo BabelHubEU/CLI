@@ -18,10 +18,25 @@ a credential and the API.
 
 ## Install
 
-The package is **not on Packagist yet** (see *Status*), so today the honest options are:
+Three ways, in the order most people want them:
 
-**As a PHAR — one file, no Composer.** Build it from this repository and copy the result into your
-pipeline, or take it from a release asset once releases exist:
+**With Composer** — into a project, or globally:
+
+```bash
+composer require --dev babelhub/cli:~0.1.0    # project
+vendor/bin/babelhub --version
+
+composer global require babelhub/cli:~0.1.0   # global
+```
+
+**Write `~0.1.0`, not `^0.1`.** Composer narrows a caret on a `0.x` version to an exact one:
+`composer require babelhub/cli:^0.1` records `0.1` in `composer.json` and installs **`0.1.0`** —
+the release that still had the Windows hook-timeout defect — while `~0.1.0` resolves to the newest
+`0.1.x`. Measured twice with a clean cache, against Packagist and against the VCS repository:
+the narrowing belongs to Composer, not to the source of the package.
+
+**As a PHAR — one file, no Composer.** Download the asset from a [release][releases] (keep the file
+name `babelhub.phar`; see *Status*), or build it from a checkout:
 
 ```bash
 composer install
@@ -29,21 +44,7 @@ php -d phar.readonly=0 build-phar.php        # → babelhub.phar
 php babelhub.phar --version
 ```
 
-**Into a project** (as a dev dependency) — add this repository as a VCS repository and require
-the current line:
-
-```bash
-composer config repositories.babelhub vcs https://gitlab.com/babelhub/cli.git
-composer require --dev babelhub/cli:~0.1.0
-vendor/bin/babelhub --version
-```
-
-**Write `~0.1.0`, not `^0.1`.** Composer narrows a caret on a `0.x` version to an exact one:
-`composer require babelhub/cli:^0.1` records `0.1` in `composer.json` and installs **`0.1.0`** —
-the release that still had the Windows hook-timeout defect — while `~0.1.0` resolves to the
-newest `0.1.x`. Measured against this repository, twice, in a clean cache.
-
-**Globally**, after publication: `composer global require babelhub/cli`.
+[releases]: https://gitlab.com/babelhub/cli/-/releases
 
 ## Credential
 
@@ -177,20 +178,20 @@ themselves.
 ## Status
 
 This repository was split out of the BabelHub monorepo (`cli/` + `bin/babelhub` + the CLI test
-suite + the CI fragments, Fala 1 item 1.11) and lives at <https://gitlab.com/babelhub/cli>.
-What is still open:
+suite + the CI fragments, Fala 1 item 1.11) and lives at <https://gitlab.com/babelhub/cli>. It is
+**public**, published on [Packagist][packagist] and carries tagged releases with the PHAR attached,
+so `composer require babelhub/cli:~0.1.0` works without any credential — as do the CI fragments we
+ship, which no longer configure a VCS repository. What is still open:
 
-* **publication (Packagist)** — the repository is **public** and carries two tagged releases
-  (`v0.1.0`, `v0.1.1`, each with the PHAR as a release asset), so the CI fragments install the CLI
-  from VCS with no credentials of their own. Registering the package on Packagist would remove the
-  `composer config repositories…` line from every fragment;
-* **language of the messages** — the CLI still speaks Polish (the manual too); the plan tracks
-  the English catalogues as an open item, and this is the channel that reaches teams abroad;
+[packagist]: https://packagist.org/packages/babelhub/cli
+
 * **the PHAR only runs under the name `babelhub.phar`** — the autoloader inside resolves its own
   path with `basename(Phar::running(false))`, which is not the alias the stub maps, so a renamed
   download fails with `phar error: invalid url or non-existent phar`. Found by fetching the release
   asset under a different name; the fix is to address the archive by the alias `Phar::mapPhar()`
-  already registers.
+  already registers;
+* **language of the messages** — the CLI still speaks Polish (the manual too); the plan tracks
+  the English catalogues as an open item, and this is the channel that reaches teams abroad.
 
 ## Licence
 
