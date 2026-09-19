@@ -143,12 +143,25 @@ commit must match the tag, an untagged one must carry a `-dev` suffix. The manif
 reference. That test is what makes `--version`, which other tools in this category get wrong,
 a checked promise rather than a comment.
 
-Release process: push a tag `vX.Y.Z` → the `release` job in `.gitlab-ci.yml` runs the full gate on
-the tagged commit, builds `babelhub.phar` and attaches it to the GitLab release. Note what the
-gate enforces at that moment: `VersionTest` requires `src/Version.php` to **equal the tag**, so the
-first release needs the constant bumped from `0.1.0-dev` to `0.1.0` — a pipeline that refuses to
-publish a binary lying about itself is the whole point of that test. Registering the repository
-with Packagist is a one-time manual step; after that, tags publish themselves.
+### Releasing
+
+The version lives in one constant and the gate enforces it against the tag, so the order matters:
+
+1. set `Version::VALUE` in `src/Version.php` to the release number (`0.1.1`, **no suffix**);
+2. commit it and tag **that exact commit**: `git tag -a v0.1.1 -m "BabelHub CLI 0.1.1"`,
+   then `git push origin main v0.1.1`;
+3. the tag pipeline runs the full gate, builds `babelhub.phar` and attaches it to the release
+   (job `release` in `.gitlab-ci.yml`);
+4. **bump to the next development version right away** (`0.1.2-dev`) and push.
+
+Skipping step 4 leaves `main` red on the next commit, and deliberately so: `tests/Cli/VersionTest.php`
+requires a tagged commit to match its tag and an untagged one to carry a `-dev` suffix. A pipeline
+that refuses to publish a binary lying about itself is the point of that test, not an obstacle —
+and the released asset is checked the same way: `php babelhub.phar --version` on `v0.1.0` answers
+`BabelHub CLI 0.1.0`.
+
+Registering the repository with Packagist is a one-time manual step; after that, tags publish
+themselves.
 
 ## Status
 
@@ -156,8 +169,14 @@ This repository was split out of the BabelHub monorepo (`cli/` + `bin/babelhub` 
 suite + the CI fragments, Fala 1 item 1.11) and lives at <https://gitlab.com/babelhub/cli>.
 What is still open:
 
-* **publication (Packagist)** — until then the CI fragments install from VCS:
-  `composer global config repositories.babelhub vcs https://gitlab.com/babelhub/cli.git`;
+* **repository visibility** — the project is private, while the CI fragments we ship install the
+  CLI from VCS; a client's pipeline can only do that with credentials of its own. Making the
+  repository public (or publishing the package) is what makes "copy the fragment and it works"
+  true;
+* **publication (Packagist)** — `v0.1.0` is tagged and carries the PHAR as a release asset, so
+  `composer global config repositories.babelhub vcs https://gitlab.com/babelhub/cli.git` followed
+  by `composer global require babelhub/cli:^0.1` resolves; Packagist would remove the first line
+  from every fragment;
 * **language of the messages** — the CLI still speaks Polish (the manual too); the plan tracks
   the English catalogues as an open item, and this is the channel that reaches teams abroad.
 
