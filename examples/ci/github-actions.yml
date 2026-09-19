@@ -57,7 +57,7 @@ jobs:
         # pakiet instalujemy z repozytorium VCS — dlatego obie są w jednym kroku.
         run: |
           composer global config repositories.babelhub vcs https://gitlab.com/babelhub/cli.git
-          composer global require babelhub/cli:^0.1 --no-interaction
+          composer global require babelhub/cli:~0.1.0 --no-interaction
           echo "$(composer global config bin-dir --absolute)" >> "$GITHUB_PATH"
 
       - name: Stan projektu (raport w logu, zawsze kod 0)
@@ -113,7 +113,7 @@ jobs:
       - name: Zainstaluj CLI babelhub
         run: |
           composer global config repositories.babelhub vcs https://gitlab.com/babelhub/cli.git
-          composer global require babelhub/cli:^0.1 --no-interaction
+          composer global require babelhub/cli:~0.1.0 --no-interaction
           echo "$(composer global config bin-dir --absolute)" >> "$GITHUB_PATH"
 
       - name: Klucze z kodu do serwisu, tłumaczenia z serwisu do plików

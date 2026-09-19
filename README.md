@@ -29,14 +29,19 @@ php -d phar.readonly=0 build-phar.php        # → babelhub.phar
 php babelhub.phar --version
 ```
 
-**Into a project** (as a dev dependency), until publication — add this repository as a VCS
-repository and require `babelhub/cli:^0.1`:
+**Into a project** (as a dev dependency) — add this repository as a VCS repository and require
+the current line:
 
 ```bash
 composer config repositories.babelhub vcs https://gitlab.com/babelhub/cli.git
-composer require --dev babelhub/cli:^0.1
+composer require --dev babelhub/cli:~0.1.0
 vendor/bin/babelhub --version
 ```
+
+**Write `~0.1.0`, not `^0.1`.** Composer narrows a caret on a `0.x` version to an exact one:
+`composer require babelhub/cli:^0.1` records `0.1` in `composer.json` and installs **`0.1.0`** —
+the release that still had the Windows hook-timeout defect — while `~0.1.0` resolves to the
+newest `0.1.x`. Measured against this repository, twice, in a clean cache.
 
 **Globally**, after publication: `composer global require babelhub/cli`.
 
@@ -175,17 +180,18 @@ This repository was split out of the BabelHub monorepo (`cli/` + `bin/babelhub` 
 suite + the CI fragments, Fala 1 item 1.11) and lives at <https://gitlab.com/babelhub/cli>.
 What is still open:
 
-* **repository visibility** — the project is private, while the CI fragments we ship install the
-  CLI from VCS; a client's pipeline can only do that with credentials of its own. Making the
-  repository public (or publishing the package) is what makes "copy the fragment and it works"
-  true;
-* **publication (Packagist)** — `v0.1.0` is tagged and carries the PHAR as a release asset, so
-  `composer global config repositories.babelhub vcs https://gitlab.com/babelhub/cli.git` followed
-  by `composer global require babelhub/cli:^0.1` resolves; Packagist would remove the first line
-  from every fragment;
+* **publication (Packagist)** — the repository is **public** and carries two tagged releases
+  (`v0.1.0`, `v0.1.1`, each with the PHAR as a release asset), so the CI fragments install the CLI
+  from VCS with no credentials of their own. Registering the package on Packagist would remove the
+  `composer config repositories…` line from every fragment;
 * **language of the messages** — the CLI still speaks Polish (the manual too); the plan tracks
-  the English catalogues as an open item, and this is the channel that reaches teams abroad.
+  the English catalogues as an open item, and this is the channel that reaches teams abroad;
+* **the PHAR only runs under the name `babelhub.phar`** — the autoloader inside resolves its own
+  path with `basename(Phar::running(false))`, which is not the alias the stub maps, so a renamed
+  download fails with `phar error: invalid url or non-existent phar`. Found by fetching the release
+  asset under a different name; the fix is to address the archive by the alias `Phar::mapPhar()`
+  already registers.
 
 ## Licence
 
-MIT — declared in `composer.json`; the `LICENSE` file is one of the open decisions above.
+MIT — declared in `composer.json` and shipped as the `LICENSE` file (Copyright © 2026 Mikołaj Panecki).

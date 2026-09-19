@@ -122,15 +122,23 @@ używał tokenu CI — kolejność źródeł jest jawna: `BABELHUB_TOKEN` wygryw
 
 ## Instalacja CLI w CI
 
-Do czasu publikacji pakietu (Fala 1, pozycja 1.11) fragmenty instalują CLI z repozytorium VCS:
+Repozytorium CLI jest publiczne, ale pakietu nie ma jeszcze w Packagu, więc fragmenty instalują
+CLI z repozytorium VCS:
 
 ```bash
 composer global config repositories.babelhub vcs https://gitlab.com/babelhub/cli.git
-composer global require babelhub/cli:^0.1 --no-interaction
+composer global require babelhub/cli:~0.1.0 --no-interaction
 export PATH="$PATH:$(composer global config bin-dir --absolute)"
 ```
 
-Po publikacji pierwsza linia znika, a druga wystarcza. Jeśli wolisz przypiąć wersję
+**Constraint piszemy jako `~0.1.0`, nigdy `^0.1`** — i to nie jest kwestia gustu. Composer zawęża
+caret na wersji `0.x` do wersji dokładnej: `require babelhub/cli:^0.1` zapisuje w `composer.json`
+`0.1` (czyli „dokładnie 0.1.0”) i **instaluje `0.1.0`**, omijając późniejsze wydania z tej samej
+linii — a `0.1.0` miało defekt limitu hook-a na Windows. Zmierzone na tym repozytorium: `^0.1`
+→ `0.1.0`, `~0.1.0` → `0.1.1`. Fragment z podmienionym constraintem przepuszcza więc bramkę,
+którą chcieliśmy mieć, i to jest dokładnie ten rodzaj cichej różnicy, którego nie widać w logu.
+
+Po publikacji w Packagu pierwsza linia znika, a druga wystarcza. Jeśli wolisz przypiąć wersję
 w `composer.json` projektu zamiast instalacji globalnej, użyj `composer require --dev babelhub/cli`
 i wołaj `vendor/bin/babelhub` — reszta fragmentu się nie zmienia.
 

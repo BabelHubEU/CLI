@@ -24,9 +24,9 @@ W tym repozytorium CLI uruchamia się bez instalacji: `docker exec ts_app php bi
 
 | Sposób | Dla kogo | Komenda |
 | --- | --- | --- |
-| `composer global require babelhub/cli` | deweloper PHP (aktualizacje przez Composera) | po wydaniu pakietu; dziś z tego repozytorium: `composer global require babelhub/cli:@dev` z `"repositories"` wskazującym to repo |
-| **binarka PHAR** | ktoś bez Composera, obraz CI, szybka próba | `curl -O https://…/babelhub.phar && chmod +x babelhub.phar && ./babelhub.phar --version` |
-| `bin/babelhub` z tego repozytorium | praca nad CLI i bramka `composer check` | `docker exec ts_app php bin/babelhub …` |
+| `composer global require babelhub/cli` | deweloper PHP (aktualizacje przez Composera) | po publikacji w Packagu; dziś z tego repozytorium: `composer global config repositories.babelhub vcs https://gitlab.com/babelhub/cli.git` i `composer global require babelhub/cli:~0.1.0` (**nie `^0.1`** — Composer zawęża caret na `0.x` do dokładnej wersji i zainstalowałby `0.1.0`) |
+| **binarka PHAR** | ktoś bez Composera, obraz CI, szybka próba | `curl -O https://…/babelhub.phar && chmod +x babelhub.phar && ./babelhub.phar --version` — **nazwa pliku musi zostać `babelhub.phar`**, bo binarka adresuje się aliasem archiwum |
+| `bin/babelhub` z **checkoutu tego repozytorium** | praca nad CLI i bramka `composer check` | `php bin/babelhub …` (albo `composer phar` i binarka) |
 
 **PHAR buduje się w repozytorium** (nie wymaga sieci ani Boxa):
 
