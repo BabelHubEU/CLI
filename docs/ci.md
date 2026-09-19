@@ -126,11 +126,11 @@ Pakiet jest w Packagu (`babelhub/cli`), więc fragmenty instalują go jedną lin
 repozytorium VCS i bez żadnego sekretu do czytania źródeł:
 
 ```bash
-composer global require babelhub/cli:~0.1.0 --no-interaction
+composer global require babelhub/cli:~0.1.3 --no-interaction
 export PATH="$PATH:$(composer global config bin-dir --absolute)"
 ```
 
-**Constraint piszemy jako `~0.1.0`, nigdy `^0.1`** — i to nie jest kwestia gustu. Composer zawęża
+**Constraint piszemy jako `~0.1.3`, nigdy `^0.1`** — i to nie jest kwestia gustu. Composer zawęża
 caret na wersji `0.x` do wersji dokładnej: `require babelhub/cli:^0.1` zapisuje w `composer.json`
 `0.1` (czyli „dokładnie 0.1.0”) i **instaluje `0.1.0`**, omijając późniejsze wydania z tej samej
 linii — a `0.1.0` miało defekt limitu hook-a na Windows. Zmierzone **dwa razy**: raz z repozytorium
@@ -138,8 +138,13 @@ VCS, raz z Packagista (zachowanie należy do Composera, nie do źródła pakietu
 `~0.1.0` → `0.1.1`. Fragment z podmienionym constraintem przechodzi więc bramkę, którą chcieliśmy
 mieć, i to jest dokładnie ten rodzaj cichej różnicy, którego nie widać w logu.
 
+Dół zakresu to **`0.1.3`**, bo to pierwsze wydanie, które rozumie `files.root_key` — deklarację,
+że komunikaty mieszkają w kopercie (`{"locale": …, "translations": {…}}`). Klient z takim plikiem
+na starszym CLI nie zobaczy błędu: `push` wyśle klucze `translations.…`, a `pull` dołoży drugą
+kopię katalogu obok starej (szczegóły i liczby: `docs/cli.md`, sekcja o `files.root_key`).
+
 Jeśli wolisz przypiąć wersję w `composer.json` projektu zamiast instalacji globalnej, użyj
-`composer require --dev babelhub/cli:~0.1.0` i wołaj `vendor/bin/babelhub` — reszta fragmentu się
+`composer require --dev babelhub/cli:~0.1.3` i wołaj `vendor/bin/babelhub` — reszta fragmentu się
 nie zmienia. Binarka bez Composera jest w wydaniach GitLaba jako asset `babelhub.phar`.
 
 ## Kody wyjścia w CI

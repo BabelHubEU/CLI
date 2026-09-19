@@ -53,11 +53,12 @@ jobs:
           coverage: none
 
       - name: Zainstaluj CLI babelhub
-        # Pakiet jest w Packagu, więc wystarczy jedna linia. Constraint piszemy jako `~0.1.0`,
+        # Pakiet jest w Packagu, więc wystarczy jedna linia. Constraint piszemy jako `~0.1.3`,
         # a **nie** `^0.1`: Composer zawęża caret na wersji `0.x` do dokładnej (`^0.1` zapisuje
-        # w `composer.json` `0.1`) i zainstalowałby `0.1.0` — wydanie z defektem limitu hook-a.
+        # w `composer.json` `0.1`) i zainstalowałby `0.1.0` — wydanie z defektem limitu hook-a,
+        # które nie zna też `files.root_key` (koperty katalogu).
         run: |
-          composer global require babelhub/cli:~0.1.0 --no-interaction
+          composer global require babelhub/cli:~0.1.3 --no-interaction
           echo "$(composer global config bin-dir --absolute)" >> "$GITHUB_PATH"
 
       - name: Stan projektu (raport w logu, zawsze kod 0)
@@ -112,7 +113,7 @@ jobs:
 
       - name: Zainstaluj CLI babelhub
         run: |
-          composer global require babelhub/cli:~0.1.0 --no-interaction
+          composer global require babelhub/cli:~0.1.3 --no-interaction
           echo "$(composer global config bin-dir --absolute)" >> "$GITHUB_PATH"
 
       - name: Klucze z kodu do serwisu, tłumaczenia z serwisu do plików
