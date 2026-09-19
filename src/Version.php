@@ -20,7 +20,7 @@ namespace BabelHub\Cli;
  */
 final class Version
 {
-    public const VALUE = '0.1.3';
+    public const VALUE = '0.1.4-dev';
 
     /** Identyfikacja klienta w parowaniu: człowiek w panelu ma widzieć, co zatwierdza. */
     public static function clientName(): string
