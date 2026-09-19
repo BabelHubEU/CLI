@@ -178,7 +178,15 @@ What is still open:
   by `composer global require babelhub/cli:^0.1` resolves; Packagist would remove the first line
   from every fragment;
 * **language of the messages** — the CLI still speaks Polish (the manual too); the plan tracks
-  the English catalogues as an open item, and this is the channel that reaches teams abroad.
+  the English catalogues as an open item, and this is the channel that reaches teams abroad;
+* **known defect on Windows (found while releasing `0.1.0`)** — a hook that ignores its timeout
+  keeps the CLI waiting for the child's pipes: `proc_open` with a command string runs `cmd /c`
+  there, and killing `cmd` does not kill the process it started, so `php -r "sleep(30);"` keeps
+  the pipe open for its full 30 seconds. The timeout still reports correctly, but the wait lasts
+  as long as the hook runs — which defeats the point of the limit (a hook reading from a terminal
+  would hang a pipeline, the exact failure the limit exists to prevent). On Linux `sh -c` replaces
+  itself with a single command, which is why CI does not see it. Fix direction: kill the process
+  **tree** on timeout (`taskkill /T /F /PID` on Windows) instead of the shell.
 
 ## Licence
 
