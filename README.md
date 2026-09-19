@@ -160,6 +160,12 @@ that refuses to publish a binary lying about itself is the point of that test, n
 and the released asset is checked the same way: `php babelhub.phar --version` on `v0.1.0` answers
 `BabelHub CLI 0.1.0`.
 
+**Run the gate after committing each step, not before.** The version test compares the constant
+with the tag on **HEAD**, so a bump that is still uncommitted is measured against the previous
+commit — and a bump on a tagged commit fails by design (`v0.1.1` on HEAD while the file already
+says `0.1.2-dev` is exactly the lying binary the guard refuses). That is how a red gate during
+a release usually looks, and it is not a defect.
+
 Registering the repository with Packagist is a one-time manual step; after that, tags publish
 themselves.
 
