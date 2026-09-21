@@ -75,6 +75,77 @@ final class CiFragmentTest extends TestCase
         self::assertNotSame([], $parsed, $file . ' nie może być pusty');
     }
 
+    /**
+     * **Polecenie, które YAML widzi jako mapę, to błąd konfiguracji platformy.**
+     *
+     * `- git commit -m "chore(i18n): synchronizacja"` **bez** cudzysłowu wokół całej linii parsuje
+     * się jako obiekt (`{"git commit -m \"chore(i18n)\"": "synchronizacja"}`), bo dwukropek ze
+     * spacją rozdziela klucz i wartość. GitLab odrzuca wtedy całą konfigurację (`script` musi być
+     * listą poleceń), a klient dowiaduje się o tym dopiero w swoim pipeline'ie — dokładnie tak
+     * wyszło to na wdrożeniu LearnHub. Walidacja YAML-a tego nie łapie (YAML jest poprawny),
+     * więc sprawdzamy **typ** wpisu.
+     */
+    #[DataProvider('fragments')]
+    public function testEveryCommandEntryIsAStringAndNotAYamlMapping(string $file): void
+    {
+        $problems = [];
+
+        foreach ($this->commandEntries(self::document($file)) as [$label, $entry]) {
+            if (!is_string($entry)) {
+                $problems[] = sprintf('%s → %s', $label, get_debug_type($entry));
+            }
+        }
+
+        self::assertSame([], $problems, sprintf(
+            '%s: polecenie z `: ` musi być w cudzysłowie — YAML robi z niego mapę, a platforma '
+            . 'odrzuca konfigurację: %s',
+            $file,
+            implode('; ', $problems),
+        ));
+    }
+
+    /**
+     * **GitLab nie zna `description` w `variables` na poziomie joba.**
+     *
+     * Schema edytora GitLaba (`jobVariables`) dopuszcza tam wyłącznie `value` i `expand`;
+     * `description` i `options` należą do sekcji najwyższego poziomu (`globalVariables`).
+     * Deklaracja z `description` w jobie kończy się błędem
+     * `config uses invalid data keys: description` i **pipeline nie powstaje wcale** — czyli nie
+     * działa też to, co z BabelHub nie ma nic wspólnego (`sast`, `secret_detection`). Wariant
+     * „opis bez wartości” w sekcji globalnej jest z kolei wymaganiem **całego** pipeline'u, więc
+     * fragment go nie używa: o tym, czego brakuje, mówi strażnik w jobie.
+     *
+     * GitHub Actions nie ma tu odpowiednika (`env` to płaska mapa napisów), więc dla tamtego
+     * pliku sprawdzamy tylko, że wartość nie jest mapą.
+     */
+    #[DataProvider('fragments')]
+    public function testVariableMapsUseOnlyKeysThePlatformAccepts(string $file): void
+    {
+        $isGitLab = str_ends_with($file, 'gitlab-ci.yml');
+        $problems = [];
+
+        foreach ($this->variableMaps(self::document($file)) as [$label, $variables]) {
+            foreach ($variables as $name => $value) {
+                if (!is_array($value)) {
+                    continue;
+                }
+
+                $unknown = $isGitLab ? array_diff(array_keys($value), ['value', 'expand']) : array_keys($value);
+                if ($unknown !== []) {
+                    $problems[] = sprintf('%s.%s: %s', $label, (string) $name, implode(', ', $unknown));
+                }
+            }
+        }
+
+        self::assertSame([], $problems, sprintf(
+            '%s: %s',
+            $file,
+            $isGitLab
+                ? 'w `variables` na poziomie joba wolno tylko `value` i `expand`, a jest: ' . implode('; ', $problems)
+                : '`env` to płaska mapa napisów, a nie obiekt: ' . implode('; ', $problems),
+        ));
+    }
+
     #[DataProvider('fragments')]
     public function testEveryCommandUsedByTheFragmentExistsInTheCli(string $file): void
     {
@@ -341,6 +412,139 @@ final class CiFragmentTest extends TestCase
         }
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * Sparsowany fragment — jeden dokument dla obu platform.
+     *
+     * @return array<string, mixed>
+     */
+    private static function document(string $file): array
+    {
+        /** @var array<string, mixed> $parsed */
+        $parsed = Yaml::parse(self::source($file));
+
+        self::assertIsArray($parsed, $file . ' musi być mapą YAML');
+
+        return $parsed;
+    }
+
+    /**
+     * Wpisy, które platforma wykonuje jako polecenia — dla obu platform, w jednym kształcie.
+     *
+     * GitLab: `script`, `before_script` i `after_script` w każdym jobie (także ukrytym, bo
+     * `extends` przenosi je do prawdziwego joba). GitHub Actions: `run` w każdym kroku.
+     *
+     * @param array<string, mixed> $document
+     *
+     * @return list<array{0: string, 1: mixed}>
+     */
+    private function commandEntries(array $document): array
+    {
+        $entries = [];
+
+        /** @var array<string, mixed> $jobs */
+        $jobs = is_array($document['jobs'] ?? null) ? $document['jobs'] : [];
+
+        if ($jobs !== []) {
+            foreach ($jobs as $job => $definition) {
+                if (!is_array($definition)) {
+                    continue;
+                }
+
+                foreach ((array) ($definition['steps'] ?? []) as $index => $step) {
+                    if (is_array($step) && array_key_exists('run', $step)) {
+                        $entries[] = [sprintf('jobs.%s.steps[%d].run', (string) $job, (int) $index), $step['run']];
+                    }
+                }
+            }
+
+            return $entries;
+        }
+
+        foreach ($this->gitLabJobs($document) as $job => $definition) {
+            foreach (['script', 'before_script', 'after_script'] as $key) {
+                foreach ((array) ($definition[$key] ?? []) as $index => $entry) {
+                    $entries[] = [sprintf('%s.%s[%d]', $job, $key, (int) $index), $entry];
+                }
+            }
+        }
+
+        return $entries;
+    }
+
+    /**
+     * Mapy zmiennych, do których platformy mają **różne** reguły.
+     *
+     * GitLab: `variables` w jobie. GitHub Actions: `env` w jobie i w kroku.
+     *
+     * @param array<string, mixed> $document
+     *
+     * @return list<array{0: string, 1: array<string, mixed>}>
+     */
+    private function variableMaps(array $document): array
+    {
+        $maps = [];
+
+        /** @var array<string, mixed> $jobs */
+        $jobs = is_array($document['jobs'] ?? null) ? $document['jobs'] : [];
+
+        if ($jobs !== []) {
+            foreach ($jobs as $job => $definition) {
+                if (!is_array($definition)) {
+                    continue;
+                }
+
+                foreach (['env' => $definition] as $key => $owner) {
+                    if (is_array($owner[$key] ?? null)) {
+                        $maps[] = [sprintf('jobs.%s.env', (string) $job), (array) $owner[$key]];
+                    }
+                }
+
+                foreach ((array) ($definition['steps'] ?? []) as $index => $step) {
+                    if (is_array($step) && is_array($step['env'] ?? null)) {
+                        $maps[] = [sprintf('jobs.%s.steps[%d].env', (string) $job, (int) $index), (array) $step['env']];
+                    }
+                }
+            }
+
+            return $maps;
+        }
+
+        foreach ($this->gitLabJobs($document) as $job => $definition) {
+            if (is_array($definition['variables'] ?? null)) {
+                $maps[] = [$job, (array) $definition['variables']];
+            }
+        }
+
+        return $maps;
+    }
+
+    /**
+     * Joby GitLaba z dokumentu — czyli wszystkie mapy najwyższego poziomu poza słowami kluczowymi.
+     *
+     * Ukryte joby (`.babelhub`) **też** tu są i to jest istotne: to w nich siedzi wspólna część,
+     * którą `extends` przenosi do prawdziwych jobów, więc błąd w nich psuje cały pipeline.
+     *
+     * @param array<string, mixed> $document
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    private function gitLabJobs(array $document): array
+    {
+        $global = ['stages', 'include', 'variables', 'default', 'workflow', 'spec', 'image', 'services', 'cache', 'before_script', 'after_script'];
+
+        $jobs = [];
+        foreach ($document as $name => $definition) {
+            if (in_array((string) $name, $global, true) || !is_array($definition)) {
+                continue;
+            }
+
+            /** @var array<string, mixed> $definition */
+            $jobs[(string) $name] = $definition;
+        }
+
+        return $jobs;
     }
 
     /**

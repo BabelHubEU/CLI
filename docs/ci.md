@@ -101,7 +101,33 @@ W obu platformach jedna zmienna: **`BABELHUB_TOKEN`** — dokładnie ta, którą
 | Platforma | Gdzie ustawić | Uwagi |
 | --- | --- | --- |
 | GitHub Actions | Settings → Secrets and variables → Actions → `BABELHUB_TOKEN` | sekrety nie trafiają do PR-ów z forków |
-| GitLab CI | Settings → CI/CD → Variables → `BABELHUB_TOKEN` (masked, protected) | bez „masked” token widać w logu joba |
+| GitLab CI | Settings → CI/CD → Variables → `BABELHUB_TOKEN` (**masked, ale nie „protected”**) | bez „masked” token widać w logu joba; „protected” psuje bramkę na merge requeście (patrz niżej) |
+
+**Dlaczego nie „protected”.** Chronione zmienne są dostępne **tylko** w pipeline'ach gałęzi
+i tagów chronionych, a od GitLaba 18.1 merge requestowe pipeline'y mają do nich dostęp wyłącznie
+wtedy, gdy **i** gałąź źródłowa, **i** docelowa są chronione. Bramka, która ma blokować merge
+request, chodzi więc na niechronionej gałęzi funkcji — z „protected” nie zobaczyłaby tokenu
+i każdy MR kończyłby się kodem `2`. Maskowanie wystarcza: fragmenty nigdy nie wypisują wartości
+zmiennej (żadnego `echo`/`env`/`printenv`), a gdy w projekcie jest włączone rozwijanie zmiennych,
+token złożony z liter, cyfr, `_` i `.` maskuje się bez problemu (przy wyłączonym rozwijaniu
+dozwolone są wszystkie znaki).
+
+**Czego w GitLabie nie wolno w tym pliku** (oba błędy kosztowały jedno wdrożenie u klienta, bo
+GitLab zgłasza je jako błąd konfiguracji i **pipeline nie powstaje wcale** — nie działa wtedy nic,
+także joby `sast` i `secret_detection`):
+
+* **`description` w `variables` na poziomie joba.** Schema GitLaba zna tam tylko `value`
+  i `expand`; `description` (i `options`) należą do sekcji `variables` najwyższego poziomu.
+  Komunikat: `config uses invalid data keys: description`. Wariant „opis bez wartości” w sekcji
+  globalnej jest z kolei **wymaganiem całego pipeline'u**, więc fragment go nie używa — zamiast
+  tego każdy job potrzebujący poświadczenia ma strażnika, który mówi wprost, czego brakuje
+  (i kończy się kodem `2`, bo to błąd konfiguracji).
+* **Niecytowane polecenie z `: ` w `script`.** `- git commit -m "chore(i18n): synchronizacja"`
+  parsuje się jako **mapa** (dwukropek ze spacją rozdziela klucz i wartość), więc `script` dostaje
+  obiekt zamiast polecenia. Całą linię bierzemy w cudzysłów: `- 'git commit -m "…"'`.
+
+Pilnuje tego `tests/Contract/CiFragmentTest` — obie reguły jako testy **na typie wpisu**
+(wcześniej testy porównywały tylko komendy i flagi z żywym CLI, więc oba błędy przechodziły).
 
 Do odesłania commita potrzebny jest jeszcze token **repozytorium** (GitHub: `GITHUB_TOKEN`
 z `permissions: contents: write`; GitLab: `I18N_BOT_TOKEN` z zakresem `write_repository`, bo

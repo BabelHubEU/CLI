@@ -24,12 +24,20 @@ stages:
   image: composer:2
   variables:
     # ZMIEŃ 1/2: adres twojej instancji BabelHub.
+    #
+    # **Tylko wartość, bez `description`.** GitLab nie przyjmuje `description` (ani `options`)
+    # w `variables` na poziomie joba — schema zna tam wyłącznie `value` i `expand`. Deklaracja
+    # z `description` kończy się błędem `config uses invalid data keys: description` i **pipeline
+    # nie powstaje wcale**, więc nie działa też to, co z BabelHub nie ma nic wspólnego (`sast`,
+    # `secret_detection`). `description` wolno użyć tylko w sekcji `variables` najwyższego
+    # poziomu — ale wariant „opis bez wartości” robi ze zmiennej warunek **całego** pipeline'u,
+    # dlatego zamiast tego joby mają strażnika, który mówi wprost, czego brakuje.
     BABELHUB_API_URL: https://babelhub.example
-    # ZMIEŃ 2/2: `BABELHUB_TOKEN` ustaw jako **maskowaną i chronioną** zmienną projektu
-    # (Settings → CI/CD → Variables). Wpis bez wartości mówi tylko, że job tej zmiennej wymaga —
-    # sekretu nie ma w repozytorium i nigdy nie może tu trafić.
-    BABELHUB_TOKEN:
-      description: "Token osobisty BabelHub (zakresy: translations:read, translations:write, qa:read)."
+    # ZMIEŃ 2/2: `BABELHUB_TOKEN` ustaw w Settings → CI/CD → Variables — **maskowany, ale NIE
+    # „protected”**. Chronione zmienne są niedostępne dla pipeline'ów merge requestów z gałęzi,
+    # które nie są chronione (od GitLaba 18.1 dostęp mają tylko wtedy, gdy i źródłowa, i docelowa
+    # gałąź są chronione), więc bramka na MR nie zobaczyłaby tokenu — a to jest cały sens tego
+    # fragmentu. Sekretu nie ma w repozytorium i nigdy nie może tu trafić.
   before_script:
     # Pakiet jest w Packagu. Constraint `~0.1.3`, a **nie** `^0.1`: Composer zawęża caret na
     # wersji `0.x` do dokładnej i `^0.1` zainstalowałby `0.1.0` (wydanie z defektem limitu hook-a,
@@ -61,6 +69,10 @@ stages:
     - .babelhub:on-merge-request
   stage: test
   script:
+    # Strażnik przed CLI: brak zmiennej to najczęstsza przyczyna czerwonego joba, a komunikat
+    # samego CLI („nie wiem, dokąd się połączyć”) nie mówi, gdzie jej szukać. Kod `2` to błąd
+    # konfiguracji — zgodnie z kontraktem kodów wyjścia CLI.
+    - 'test -n "${BABELHUB_API_URL:-}" && test -n "${BABELHUB_TOKEN:-}" || { echo "Brak BABELHUB_API_URL i/lub BABELHUB_TOKEN — ustaw je w Settings → CI/CD → Variables (maskowany, nie protected)."; exit 2; }'
     - babelhub status --output=plain
     - babelhub push --dry-run --output=json
     - babelhub validate --check=coverage --fail-on=error --output=plain
@@ -72,6 +84,7 @@ stages:
     - .babelhub:on-merge-request
   stage: test
   script:
+    - 'test -n "${BABELHUB_API_URL:-}" && test -n "${BABELHUB_TOKEN:-}" || { echo "Brak BABELHUB_API_URL i/lub BABELHUB_TOKEN — ustaw je w Settings → CI/CD → Variables (maskowany, nie protected)."; exit 2; }'
     - babelhub validate --check=quality --fail-on=error --output=plain
 
 # Kontrola ma wagę ostrzeżenia, więc przy `--fail-on=error` **raportuje, ale nie blokuje**:
@@ -84,6 +97,7 @@ stages:
     - .babelhub:on-merge-request
   stage: test
   script:
+    - 'test -n "${BABELHUB_API_URL:-}" && test -n "${BABELHUB_TOKEN:-}" || { echo "Brak BABELHUB_API_URL i/lub BABELHUB_TOKEN — ustaw je w Settings → CI/CD → Variables (maskowany, nie protected)."; exit 2; }'
     - babelhub validate --check=acceptance --fail-on=error --output=plain
 
 # Synchronizacja po scaleniu do gałęzi głównej.
@@ -94,6 +108,8 @@ stages:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: always
   script:
+    # Trzy zmienne, bo commit zwrotny potrzebuje jeszcze tokenu repozytorium.
+    - 'test -n "${BABELHUB_API_URL:-}" && test -n "${BABELHUB_TOKEN:-}" && test -n "${I18N_BOT_TOKEN:-}" || { echo "Brak BABELHUB_API_URL, BABELHUB_TOKEN lub I18N_BOT_TOKEN — ustaw je w Settings → CI/CD → Variables."; exit 2; }'
     - babelhub sync --output=json
     # Commit zwrotny tylko wtedy, gdy są zmiany — inaczej każdy przebieg zostawiałby pusty commit.
     - |
@@ -104,7 +120,10 @@ stages:
     - git config user.name "babelhub-bot"
     - git config user.email "babelhub-bot@users.noreply.gitlab.example"
     - git add translations/ .babelhub.lock.json
-    - git commit -m "chore(i18n): synchronizacja tłumaczeń z BabelHub"
+    # **Cudzysłów wokół całej linii jest obowiązkowy.** Bez niego YAML widzi w `- git commit
+    # -m "…: …"` **mapę** (dwukropek ze spacją rozdziela klucz i wartość), więc `script` dostaje
+    # obiekt zamiast polecenia i platforma odrzuca konfigurację.
+    - 'git commit -m "chore(i18n): synchronizacja tłumaczeń z BabelHub"'
     # ZMIEŃ 3/3: `I18N_BOT_TOKEN` to **maskowana** zmienna projektu (Project → Settings → CI/CD
     # → Variables) z tokenem dostępu o zakresie `write_repository`. Token joba GitLaba
     # (`CI_JOB_TOKEN`) tu nie działa: nie ma prawa wypychać commitów.
