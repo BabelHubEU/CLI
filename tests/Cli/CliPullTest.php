@@ -171,6 +171,47 @@ final class CliPullTest extends TestCase
         self::assertSame(7, $lock->versionFor('pl_PL'));
     }
 
+    /**
+     * **Lock też nie może się zmienić, gdy serwis odpowiada `304`.**
+     *
+     * To jest regresja, która kosztowała pętlę w CI: gałąź `304` przepisywała `pulled_at`
+     * bieżącym czasem, więc `babelhub sync` robił commit, commit wywoływał kolejny pipeline,
+     * a ten następny commit — dziesięć commitów bota w pięć minut na LearnHubie (20:04–20:09),
+     * każdy zmieniający wyłącznie tę datę.
+     *
+     * Data jest tu **podstawiona** (`SENTINEL`), a nie zmierzona po pierwszym `pull`: dwa
+     * przebiegi w jednym teście dzieją się w tej samej sekundzie, więc `DATE_ATOM` dałby
+     * identyczny napis i porównanie przeszłoby **także z błędem**. Sprawdzone: cofnięcie
+     * naprawy nie wywracało wersji z porównaniem bajtów po dwóch `pull`-ach, a wywraca tę.
+     */
+    public function testANotModifiedAnswerDoesNotRewriteTheLock(): void
+    {
+        $this->workspace->writeProjectConfig();
+        $this->workspace->writeCredentials();
+        $this->workspace->write('translations/messages.pl_PL.php', "<?php\n\nreturn ['a.one' => 'One'];\n");
+        $this->workspace->saveLock(new CatalogLock('learnhub', [
+            'pl_PL' => ['version' => 7, 'keys' => 1, 'pulled_at' => 'SENTINEL'],
+        ]));
+        $lockBefore = $this->workspace->read(CatalogLock::FILE_NAME);
+
+        $client = $this->scriptProject($this->client());
+        $client->script('GET', self::CATALOG_PATH, [], 304);
+
+        $result = $this->workspace->run(['command' => 'pull'], $client);
+
+        self::assertSame(ExitCode::Success->value, $result['code']);
+        self::assertSame(
+            'SENTINEL',
+            $this->workspace->loadLock()?->pulledAtFor('pl_PL'),
+            'nic nie zapisano, więc data ostatniego zapisu pliku nie ma prawa się ruszyć',
+        );
+        self::assertSame(
+            $lockBefore,
+            $this->workspace->read(CatalogLock::FILE_NAME),
+            'lock po 304 musi być identyczny — inaczej `git diff --quiet` w jobie widzi zmianę i commit leci w kółko',
+        );
+    }
+
     public function testAnEmptyCatalogNeitherCreatesNorTruncatesTheFile(): void
     {
         $file = 'translations/messages.pl_PL.php';

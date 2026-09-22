@@ -94,6 +94,22 @@ final readonly class CatalogLock
         return $this->locales[$locale]['keys'] ?? null;
     }
 
+    /**
+     * Kiedy plik tego języka został **ostatnio zapisany** przez `pull` (`''` = nigdy).
+     *
+     * Potrzebne, bo `pull` buduje nowy lock od zera: gdy serwis odpowie `304` (albo katalog jest
+     * pusty) nic nie zapisano, więc data musi przyjść z **poprzedniego** locka, a nie z bieżącego
+     * czasu. Wersja tej metody bez tego rozróżnienia kosztowała realną pętlę w CI: `304`
+     * przepisywało `pulled_at` bieżącym czasem, lock zmieniał się przy każdym przebiegu `sync`,
+     * więc każdy przebieg robił commit, a każdy commit wywoływał kolejny pipeline. Zmierzone
+     * na LearnHubie: dziesięć commitów bota w pięć minut (20:04:19–20:08:59), każdy zmieniający
+     * **wyłącznie** `pulled_at`.
+     */
+    public function pulledAtFor(string $locale): string
+    {
+        return $this->locales[$locale]['pulled_at'] ?? '';
+    }
+
     /** @return list<string> */
     public function localeCodes(): array
     {

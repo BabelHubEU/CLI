@@ -132,7 +132,10 @@ final readonly class CliPull
                 $keys = $lock?->keysFor($locale) ?? 0;
                 $outcomes[$locale] = ['outcome' => PullOutcome::Skipped->value, 'version' => $known, 'keys' => $keys];
                 if ($known !== null) {
-                    $updated = $updated->withLocale($locale, $known, $keys, $now);
+                    // Datę bierzemy z **poprzedniego** locka, nie z `$now`: nic nie zapisano, więc
+                    // `pulled_at` nie ma prawa się ruszyć. Inaczej lock różni się przy każdym
+                    // przebiegu i `sync` w CI commituje samą datę — w kółko (patrz `pulledAtFor`).
+                    $updated = $updated->withLocale($locale, $known, $keys, $lock?->pulledAtFor($locale) ?? '');
                 }
                 continue;
             }
@@ -173,7 +176,9 @@ final readonly class CliPull
                 }
 
                 $outcomes[$locale] = ['outcome' => PullOutcome::Empty->value, 'version' => $version, 'keys' => 0];
-                $updated = $updated->withLocale($locale, $version, 0, $now);
+                // Pusty katalog **nie kasuje pliku**, więc i tu nic nie zapisano: `pulled_at`
+                // zostaje z poprzedniego locka, a zmienia się tylko wersja (ta jedzie w `If-None-Match`).
+                $updated = $updated->withLocale($locale, $version, 0, $lock?->pulledAtFor($locale) ?? '');
                 continue;
             }
 

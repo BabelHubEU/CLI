@@ -155,6 +155,25 @@ final class CatalogLockTest extends TestCase
         self::assertNull($original->versionFor('de_DE'), 'łańcuch zmian nie dotyka oryginału');
     }
 
+    /**
+     * `pulledAtFor` istnieje po to, żeby `pull` mógł **zachować** datę ostatniego zapisu, gdy
+     * nic nie zapisano (`304` albo pusty katalog). Bez tego `304` przepisywało `pulled_at`
+     * bieżącym czasem, lock zmieniał się przy każdym przebiegu `sync`, więc każdy przebieg robił
+     * commit, a każdy commit wywoływał kolejny pipeline — zmierzone na LearnHubie: dziesięć
+     * commitów bota w pięć minut, każdy zmieniający wyłącznie tę datę.
+     */
+    public function testPulledAtForTellsWhenTheFileWasLastWritten(): void
+    {
+        $lock = new CatalogLock('learnhub', [
+            'pl_PL' => ['version' => 7, 'keys' => 2, 'pulled_at' => '2026-09-14T09:13:27+00:00'],
+            'en_GB' => ['version' => 1, 'keys' => 91, 'pulled_at' => ''],
+        ]);
+
+        self::assertSame('2026-09-14T09:13:27+00:00', $lock->pulledAtFor('pl_PL'));
+        self::assertSame('', $lock->pulledAtFor('en_GB'), 'pusty wpis znaczy „nigdy nie zapisano”, a nie „nie wiem”');
+        self::assertSame('', $lock->pulledAtFor('de_DE'), 'języka bez historii nie da się opisać datą');
+    }
+
     public function testKeysForAndVersionForAMissingLocaleAreNull(): void
     {
         $lock = new CatalogLock('learnhub', []);

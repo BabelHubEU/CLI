@@ -195,6 +195,32 @@ final class CredentialsStoreTest extends TestCase
         self::assertSame('user', $decoded['authenticated_as']);
     }
 
+    /**
+     * `plain` to tryb, w którym `grep zakresy` ma mieć sens — a `whoami` **nie wypisywało w nim
+     * niczego**, bo wszystkie linie szły przez `result()` (widoczne tylko w `text`). Zgłoszone
+     * z życia: „`whoami --output=plain` nie zwraca nic, a bez `--output` wyświetla się normalnie”.
+     * `status` robi to od początku przez `plain()`, więc rozjazd był tylko w tej komendzie.
+     */
+    public function testWhoamiInPlainModeIsGreppable(): void
+    {
+        $this->store()->save(new Credentials('https://babelhub.example', 'pat_sekret'));
+        $client = (new FakeApiClient('https://babelhub.example'))->script('GET', '/api/v1/me', [
+            'authenticated_as' => 'user',
+            'organization' => ['name' => 'Acme', 'slug' => 'acme'],
+            'scopes' => ['translations:read', 'qa:read'],
+            'user' => ['username' => 'admin', 'display_name' => 'Mikołaj'],
+            'token' => ['name' => 'laptop', 'expires_at' => '2027-01-01T00:00:00+00:00'],
+        ]);
+
+        $result = $this->runCli(['command' => 'whoami', '--output' => 'plain'], $client);
+
+        self::assertSame(ExitCode::Success->value, $result['code']);
+        self::assertStringContainsString('zakresy:     translations:read, qa:read', $result['stdout']);
+        self::assertStringContainsString('konto:       Mikołaj (admin)', $result['stdout']);
+        self::assertStringContainsString('token:       laptop', $result['stdout']);
+        self::assertStringNotContainsString('<info>', $result['stdout'], 'dekoracja nie może wejść do wyniku do grep/awk');
+    }
+
     public function testAnUnknownOutputModeIsRejectedInsteadOfFallingBackToText(): void
     {
         $this->store()->save(new Credentials('https://babelhub.example', 'pat_sekret'));

@@ -96,19 +96,23 @@ final class WhoamiCommand extends Command
 
         $printer->json($me);
 
+        // Nagłówek to dekoracja (`result()` — tylko `text`), a **pola idą przez `plain()`**,
+        // czyli są też w trybie `plain`. Wcześniej wszystkie linie szły przez `result()`, więc
+        // `whoami --output=plain` nie wypisywało **nic** — a to jedyny tryb, w którym
+        // `grep zakresy` ma sens. `status` robi to od początku właśnie tak (patrz `StatusCommand`).
         $printer->result(sprintf('<info>%s</info>', (string) ($organization['name'] ?? '—')));
-        $printer->result(sprintf('  serwis:      %s', $credentials->apiUrl));
-        $printer->result(sprintf('  poświadczenie: %s', (string) ($me['authenticated_as'] ?? '—')));
+        $printer->plain(sprintf('  serwis:      %s', $credentials->apiUrl));
+        $printer->plain(sprintf('  poświadczenie: %s', (string) ($me['authenticated_as'] ?? '—')));
         if ($user !== null) {
-            $printer->result(sprintf('  konto:       %s (%s)', (string) ($user['display_name'] ?? '—'), (string) ($user['username'] ?? '—')));
+            $printer->plain(sprintf('  konto:       %s (%s)', (string) ($user['display_name'] ?? '—'), (string) ($user['username'] ?? '—')));
         }
         if ($application !== null) {
-            $printer->result(sprintf('  aplikacja:   %s', (string) ($application['slug'] ?? '—')));
+            $printer->plain(sprintf('  aplikacja:   %s', (string) ($application['slug'] ?? '—')));
         }
         if ($token !== null) {
-            $printer->result(sprintf('  token:       %s (ważny do: %s)', (string) ($token['name'] ?? '—'), (string) ($token['expires_at'] ?? 'bez terminu')));
+            $printer->plain(sprintf('  token:       %s (ważny do: %s)', (string) ($token['name'] ?? '—'), (string) ($token['expires_at'] ?? 'bez terminu')));
         }
-        $printer->result('  zakresy:     ' . ($scopes === [] ? '—' : implode(', ', $scopes)));
+        $printer->plain('  zakresy:     ' . ($scopes === [] ? '—' : implode(', ', $scopes)));
 
         return ExitCode::Success->value;
     }
