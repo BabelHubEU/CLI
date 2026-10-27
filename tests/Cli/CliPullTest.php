@@ -7,6 +7,7 @@ namespace Tests\Cli;
 use BabelHub\Cli\Application\CliPull;
 use BabelHub\Cli\Config\CatalogLock;
 use BabelHub\Cli\Config\CatalogSource;
+use BabelHub\Cli\Files\CatalogSnapshotReader;
 use BabelHub\Cli\Config\ProjectConfig;
 use BabelHub\Cli\ExitCode;
 use BabelHub\Cli\Files\LocaleFile;
@@ -141,7 +142,7 @@ final class CliPullTest extends TestCase
         self::assertTrue($this->workspace->exists($file));
 
         // Ślad lokalnej pracy: gdyby `304` cokolwiek zapisało, zmieniłaby się i treść, i mtime.
-        $sentinel = "<?php\n\nreturn ['local' => 'edycja, która nie może zniknąć'];\n";
+        $sentinel = "<?php\n\nreturn ['a.one' => 'One', 'b.two' => 'Two', 'local' => 'edycja, która nie może zniknąć'];\n";
         $this->workspace->write($file, $sentinel);
         $this->workspace->setModificationTime($file, time() - 7200);
         $before = $this->workspace->modificationTime($file);
@@ -193,6 +194,7 @@ final class CliPullTest extends TestCase
         $this->workspace->saveLock(new CatalogLock('learnhub', [
             'pl_PL' => ['version' => 7, 'keys' => 1, 'pulled_at' => 'SENTINEL'],
         ], new CatalogSource(CliWorkspace::API_URL, 'acme')));
+        $this->recordLocalSnapshot();
         $lockBefore = $this->workspace->read(CatalogLock::FILE_NAME);
 
         $client = $this->scriptProject($this->client());
@@ -293,9 +295,9 @@ final class CliPullTest extends TestCase
 
         self::assertFileDoesNotExist($this->workspace->path($file), '--check nie dopisuje plików do repozytorium — to cała jego wartość w CI');
         self::assertSame(
-            ['If-None-Match' => '"5"'],
+            [],
             (new RecordedRequests($client))->headers('GET', self::CATALOG_PATH),
-            'rozjazd jest między lockiem a serwisem, więc pytamy wersją z locka',
+            'lock bez odcisku lokalnych plików wymaga pełnego katalogu',
         );
 
         $lock = $this->workspace->loadLock();
@@ -312,6 +314,7 @@ final class CliPullTest extends TestCase
             'pl_PL' => ['version' => 7, 'keys' => 1, 'pulled_at' => 'SENTINEL'],
         ], new CatalogSource(CliWorkspace::API_URL, 'acme')));
 
+        $this->recordLocalSnapshot();
         $client = $this->scriptProject($this->client());
         $client->script('GET', self::CATALOG_PATH, [], 304);
 
@@ -495,7 +498,7 @@ final class CliPullTest extends TestCase
             'kod wyjścia komendy musi dojść do pipeline\'u — inaczej bramka istnieje tylko w dokumentacji',
         );
         self::assertStringContainsString('rozjazd: serwis ma wersję 8', $result['stdout']);
-        self::assertSame(['If-None-Match' => '"7"'], (new RecordedRequests($client))->headers('GET', self::CATALOG_PATH));
+        self::assertSame([], (new RecordedRequests($client))->headers('GET', self::CATALOG_PATH));
         self::assertSame('SENTINEL', $this->workspace->loadLock()?->locales['pl_PL']['pulled_at'] ?? null);
     }
 
@@ -619,9 +622,11 @@ final class CliPullTest extends TestCase
 
     public function testCanonicalIdentityIsReusedAfterCredentialRotation(): void
     {
+        $this->workspace->write('translations/messages.pl_PL.php', "<?php return ['a.one' => 'One'];\n");
         $this->workspace->saveLock(new CatalogLock('learnhub', [
             'pl_PL' => ['version' => 7, 'keys' => 1, 'pulled_at' => 'sentinel'],
         ], new CatalogSource('https://BABELHUB.EXAMPLE:443/', 'acme')));
+        $this->recordLocalSnapshot();
         $before = $this->workspace->read(CatalogLock::FILE_NAME);
         $client = $this->scriptProject($this->client());
         $client->withToken('pat_rotated.secret');
@@ -669,6 +674,129 @@ final class CliPullTest extends TestCase
         yield 'missing organization' => [200, [], ExitCode::Failure->value];
         yield 'missing slug' => [200, ['organization' => ['name' => 'Display name']], ExitCode::Failure->value];
         yield 'invalid slug type' => [200, ['organization' => ['slug' => 42]], ExitCode::Failure->value];
+    }
+
+    public function testChangingTheOutputLayoutInvalidatesLocalProofs(): void
+    {
+        $client = $this->scriptProject($this->client());
+        $this->scriptCatalog($client, 7, ['a.one' => 'One']);
+        self::assertSame(ExitCode::Success->value, $this->runPull($client)['code']);
+        $config = $this->config('json', 'new-location/messages.{lang}.json', rootKey: 'translations');
+        $before = $this->workspace->read(CatalogLock::FILE_NAME);
+        self::assertSame(ExitCode::CheckFailed->value, $this->runPull($client, $config, check: true)['code']);
+        self::assertFileDoesNotExist($config->fileFor('pl_PL', $this->workspace->root()));
+        self::assertSame($before, $this->workspace->read(CatalogLock::FILE_NAME));
+        self::assertSame(ExitCode::Success->value, $this->runPull($client, $config)['code']);
+        self::assertSame([], (new RecordedRequests($client))->headers('GET', self::CATALOG_PATH, 2));
+        self::assertFileExists($config->fileFor('pl_PL', $this->workspace->root()));
+    }
+
+    public function testCorruptLocalFileMakesCheckFailWithoutRepairingOrRewritingIt(): void
+    {
+        $config = $this->config('json', 'translations/messages.{lang}.json');
+        $client = $this->scriptProject($this->client());
+        $this->scriptCatalog($client, 7, ['a.one' => 'One']);
+        self::assertSame(ExitCode::Success->value, $this->runPull($client, $config)['code']);
+        $this->workspace->write('translations/messages.pl_PL.json', '{broken');
+        $before = $this->workspace->read(CatalogLock::FILE_NAME);
+        self::assertSame(ExitCode::CheckFailed->value, $this->runPull($client, $config, check: true)['code']);
+        self::assertSame('{broken', $this->workspace->read('translations/messages.pl_PL.json'));
+        self::assertSame($before, $this->workspace->read(CatalogLock::FILE_NAME));
+    }
+
+    private function recordLocalSnapshot(): void
+    {
+        $lock = $this->workspace->loadLock();
+        self::assertNotNull($lock);
+        $snapshot = (new CatalogSnapshotReader())->capture($this->config(), $this->workspace->root(), 'pl_PL', ['a.one']);
+        self::assertNotNull($snapshot);
+        $this->workspace->saveLock($lock->withLocale(
+            'pl_PL',
+            $lock->versionFor('pl_PL') ?? 0,
+            $lock->keysFor('pl_PL') ?? 0,
+            $lock->pulledAtFor('pl_PL'),
+            $snapshot,
+        ));
+    }
+
+    #[DataProvider('localFileDrifts')]
+    public function testLocalDriftFailsCheckWithoutWritesAndPullRepairsIt(string $format, string $pattern, ?string $rootKey, string $change): void
+    {
+        $config = $this->config($format, $pattern, nested: true, rootKey: $rootKey);
+        $client = $this->scriptProject($this->client());
+        $messages = ['a.one' => 'One', 'b.two' => 'Two'];
+        $this->scriptCatalog($client, 7, $messages);
+        self::assertSame(ExitCode::Success->value, $this->runPull($client, $config)['code']);
+        $path = $config->fileFor('pl_PL', $this->workspace->root(), $config->usesNamespaces() ? 'b' : null);
+        if ($change === 'missing file') {
+            unlink($path);
+        } else {
+            $data = (new LocaleFile($format))->read($path, $rootKey);
+            if ($change === 'missing managed key') {
+                unset($data['b.two']);
+            } else {
+                $data['b.two'] = 'Local edit';
+            }
+            $document = $rootKey !== null ? [$rootKey => $data, 'locale' => 'pl_PL'] : $data;
+            file_put_contents($path, $format === ProjectConfig::FORMAT_JSON
+                ? json_encode($document, JSON_THROW_ON_ERROR)
+                : '<?php return ' . var_export($document, true) . ';');
+        }
+        $beforeLock = $this->workspace->read(CatalogLock::FILE_NAME);
+        $beforeFile = is_file($path) ? file_get_contents($path) : null;
+        $beforeTime = is_file($path) ? filemtime($path) : null;
+        self::assertSame(ExitCode::CheckFailed->value, $this->runPull($client, $config, check: true)['code']);
+        self::assertSame([], (new RecordedRequests($client))->headers('GET', self::CATALOG_PATH, 1));
+        self::assertSame($beforeLock, $this->workspace->read(CatalogLock::FILE_NAME));
+        self::assertSame($beforeFile, is_file($path) ? file_get_contents($path) : null);
+        self::assertSame($beforeTime, is_file($path) ? filemtime($path) : null);
+        self::assertSame(ExitCode::Success->value, $this->runPull($client, $config)['code']);
+        self::assertSame([], (new RecordedRequests($client))->headers('GET', self::CATALOG_PATH, 2));
+        $lock = $this->workspace->loadLock();
+        self::assertNotNull($lock);
+        $snapshot = $lock->snapshotFor('pl_PL');
+        self::assertNotNull($snapshot);
+        self::assertTrue((new CatalogSnapshotReader())->matches($snapshot, $config, $this->workspace->root(), 'pl_PL'));
+        self::assertSame('Two', (new LocaleFile($format))->read($path, $rootKey)['b.two']);
+    }
+
+    /** @return iterable<string, array{string, string, string|null, string}> */
+    public static function localFileDrifts(): iterable
+    {
+        $layouts = [
+            'PHP' => ['php', 'translations/messages.{lang}.php', null],
+            'nested JSON' => ['json', 'translations/messages.{lang}.json', null],
+            'root_key' => ['json', 'translations/messages.{lang}.json', 'translations'],
+            'namespaces' => ['php', 'translations/{lang}/{ns}.php', null],
+            'namespaces with root_key' => ['json', 'translations/{lang}/{ns}.json', 'translations'],
+        ];
+        foreach ($layouts as $name => [$format, $pattern, $root]) {
+            foreach (['missing file', 'edited value', 'missing managed key'] as $change) {
+                yield $name . ': ' . $change => [$format, $pattern, $root, $change];
+            }
+        }
+    }
+
+    public function testAdditionalLocalKeysFormattingAndEnvelopeMetadataDoNotCauseDrift(): void
+    {
+        $config = $this->config('json', 'translations/messages.{lang}.json', rootKey: 'translations');
+        $client = $this->scriptProject($this->client());
+        $this->scriptCatalog($client, 7, ['a.one' => 'One']);
+        $client->script('GET', self::CATALOG_PATH, [], 304);
+        self::assertSame(ExitCode::Success->value, $this->runPull($client, $config)['code']);
+        $this->workspace->write('translations/messages.pl_PL.json', '{"metadata":"Local","translations":{"local.extra":"Extra","a":{"one":"One"}}}');
+        $before = $this->workspace->read(CatalogLock::FILE_NAME);
+        self::assertSame(ExitCode::Success->value, $this->runPull($client, $config, check: true)['code']);
+        self::assertSame(['If-None-Match' => '"7"'], (new RecordedRequests($client))->headers('GET', self::CATALOG_PATH, 1));
+        self::assertSame($before, $this->workspace->read(CatalogLock::FILE_NAME));
+    }
+
+    public function testUnchangedFilesPassCheckEvenWhenTheServerSends200(): void
+    {
+        $client = $this->scriptProject($this->client());
+        $this->scriptCatalog($client, 7, ['a.one' => 'One']);
+        self::assertSame(ExitCode::Success->value, $this->runPull($client)['code']);
+        self::assertSame(ExitCode::Success->value, $this->runPull($client, check: true)['code']);
     }
 
     private function client(): FakeApiClient

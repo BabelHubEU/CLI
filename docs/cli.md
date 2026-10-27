@@ -403,6 +403,19 @@ pełnego `pull`. Niedostępna lub niepełna odpowiedź o organizacji przerywa op
 locka; nie jest zastępowana nazwą profilu ani zapamiętaną nazwą wyświetlaną organizacji.
 Adres serwera nie może zawierać danych logowania, query ani fragmentu.
 
+Każdy język zapisuje też `snapshot`: listę zarządzanych kluczy, SHA-256 ich znormalizowanych
+wartości i odcisk konfiguracji zapisu (wzorzec plików, format, `root_key`, opcje oraz hook).
+Odcisk jest liczony z właściwych plików namespace’ów, po pomyślnym wykonaniu hooka.
+Formatowanie, kolejność kluczy, dodatkowe lokalne tłumaczenia i metadane poza `root_key`
+nie powodują rozjazdu. Brak pliku, brak zarządzanego klucza, zmieniona wartość lub zmiana
+konfiguracji wymagają pełnego pobrania bez ETagu. `--check` kończy się wtedy kodem 6
+bez zapisu plików, locka ani uruchomienia hooka. Lock bez `snapshot` wymaga jednego pełnego pull.
+
+Nieudany hook pozostawia jedynie prowizoryczne metadane bez odcisku zapisanych języków;
+nie pozwalają one uzyskać fałszywego „bez zmian”, więc kolejny pull pobierze katalog i ponowi hook.
+Hook, który usuwa zarządzane klucze, także kończy operację błędem. Pusty katalog nadal nie kasuje
+lokalnej pracy: przy braku zarządzanych kluczy nie wymaga istnienia pliku językowego.
+
 **Czego nie ma: `pull --version=N`.** Serwis trzyma **jedną** wersję na (projekt, język) —
 historię treści planujemy dopiero w Fali 3 (`translation_revisions`). Polecenie, które
 „odtwarza wersję 7” z bazy, w której jest 12, działałoby i zwracało coś innego niż obiecuje;

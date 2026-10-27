@@ -32,7 +32,7 @@ final readonly class CatalogLock
     public const FILE_NAME = '.babelhub.lock.json';
 
     /**
-     * @param array<string, array{version: int, keys: int, pulled_at: string}> $locales
+     * @param array<string, array{version: int, keys: int, pulled_at: string, snapshot?: array{keys: list<string>, hash: string, layout: string}}> $locales
      */
     public function __construct(
         public string $project,
@@ -62,6 +62,10 @@ final readonly class CatalogLock
                 'keys' => is_int($entry['keys'] ?? null) ? $entry['keys'] : 0,
                 'pulled_at' => is_string($entry['pulled_at'] ?? null) ? $entry['pulled_at'] : '',
             ];
+            $snapshot = is_array($entry['snapshot'] ?? null) ? CatalogSnapshot::fromArray($entry['snapshot']) : null;
+            if ($snapshot !== null) {
+                $normalized[$code]['snapshot'] = $snapshot->toArray();
+            }
         }
 
         return new self(
@@ -84,6 +88,12 @@ final readonly class CatalogLock
     public function belongsTo(string $project, CatalogSource $source): bool
     {
         return $this->project === $project && $this->source !== null && $this->source->equals($source);
+    }
+
+    public function snapshotFor(string $locale): ?CatalogSnapshot
+    {
+        $data = $this->locales[$locale]['snapshot'] ?? null;
+        return is_array($data) ? CatalogSnapshot::fromArray($data) : null;
     }
 
     public function versionFor(string $locale): ?int
@@ -134,10 +144,13 @@ final readonly class CatalogLock
      * i „lock po pull” mogą istnieć obok siebie: `--check` porównuje oba i mówi, co się
      * rozjechało, zamiast nadpisywać dowód rozbieżności.
      */
-    public function withLocale(string $locale, int $version, int $keys, string $pulledAt): self
+    public function withLocale(string $locale, int $version, int $keys, string $pulledAt, ?CatalogSnapshot $snapshot = null): self
     {
         $locales = $this->locales;
         $locales[$locale] = ['version' => $version, 'keys' => $keys, 'pulled_at' => $pulledAt];
+        if ($snapshot !== null) {
+            $locales[$locale]['snapshot'] = $snapshot->toArray();
+        }
 
         return new self($this->project, $locales, $this->source);
     }

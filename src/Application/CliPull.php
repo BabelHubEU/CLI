@@ -6,6 +6,7 @@ namespace BabelHub\Cli\Application;
 
 use BabelHub\Cli\Config\CatalogLock;
 use BabelHub\Cli\Config\CatalogSource;
+use BabelHub\Cli\Files\CatalogSnapshotReader;
 use BabelHub\Cli\Config\CatalogLockStore;
 use BabelHub\Cli\Config\ProjectConfig;
 use BabelHub\Cli\CliIoException;
@@ -55,6 +56,7 @@ final readonly class CliPull
         private ApiClientInterface $client,
         private Printer $printer,
         private PostProcessRunner $postProcessRunner = new PostProcessRunner(),
+        private CatalogSnapshotReader $snapshots = new CatalogSnapshotReader(),
     ) {
     }
 
@@ -143,14 +145,23 @@ final readonly class CliPull
         $file = new LocaleFile($config->fileFormat);
         $now = (new DateTimeImmutable())->format(DATE_ATOM);
 
+        /** @var array<string, list<string>> $managedKeys */
+        $managedKeys = [];
         foreach ($locales as $locale) {
             $known = $lock?->versionFor($locale);
-            $headers = $known !== null ? ['If-None-Match' => '"' . $known . '"'] : [];
+            $snapshot = $lock?->snapshotFor($locale);
+            $locallyValid = $snapshot !== null && $this->snapshots->matches($snapshot, $config, $root, $locale);
+            $headers = $known !== null && $locallyValid ? ['If-None-Match' => '"' . $known . '"'] : [];
 
             $response = $this->client->get($projectPath . '/translations/' . rawurlencode($locale), [], $headers);
 
             if ($response->status === 304) {
-                if ($known === null) {
+                if (!$locallyValid && $known !== null && $checkOnly) {
+                    $drifted = true;
+                    $outcomes[$locale] = ['outcome' => PullOutcome::Drifted->value, 'version' => $known, 'keys' => $lock?->keysFor($locale) ?? 0];
+                    continue;
+                }
+                if ($known === null || !$locallyValid) {
                     $this->printer->error(sprintf('%s: serwis zwrócił 304 bez warunku dla zaufanego locka.', $locale));
                     $outcomes[$locale] = ['outcome' => PullOutcome::Failed->value, 'version' => null, 'keys' => 0];
                     $failure = ExitCode::Failure;
@@ -164,7 +175,8 @@ final readonly class CliPull
                 // Datę bierzemy z **poprzedniego** locka, nie z `$now`: nic nie zapisano, więc
                 // `pulled_at` nie ma prawa się ruszyć. Inaczej lock różni się przy każdym
                 // przebiegu i `sync` w CI commituje samą datę — w kółko (patrz `pulledAtFor`).
-                $updated = $updated->withLocale($locale, $known, $keys, $lock?->pulledAtFor($locale) ?? '');
+                $updated = $updated->withLocale($locale, $known, $keys, $lock?->pulledAtFor($locale) ?? '', $snapshot);
+                $managedKeys[$locale] = $snapshot->keys;
                 continue;
             }
 
@@ -191,13 +203,17 @@ final readonly class CliPull
 
             $version = is_int($payload['version'] ?? null) ? $payload['version'] : 0;
 
+            if ($checkOnly && $locallyValid && $known === $version) {
+                $outcomes[$locale] = ['outcome' => PullOutcome::Skipped->value, 'version' => $version, 'keys' => count($messages)];
+                continue;
+            }
             if ($messages === []) {
                 // Pusty katalog w trybie `--check` **jest rozjazdem**, gdy lock mówi o innej
                 // wersji: `pull` przepisałby wtedy lock na `$version`, a repozytorium zostałoby
                 // z plikami ze starej wersji. Wcześniej ta gałąź `continue`-owała przed
                 // sprawdzeniem `$checkOnly`, więc bramka CI mówiła „zsynchronizowane”
                 // o repozytorium, które `pull` jeszcze by zmienił.
-                if ($checkOnly && $known !== $version) {
+                if ($checkOnly && ($known !== $version || !$locallyValid)) {
                     $drifted = true;
                     $outcomes[$locale] = ['outcome' => PullOutcome::Drifted->value, 'version' => $version, 'keys' => 0];
                     continue;
@@ -207,6 +223,7 @@ final readonly class CliPull
                 // Pusty katalog **nie kasuje pliku**, więc i tu nic nie zapisano: `pulled_at`
                 // zostaje z poprzedniego locka, a zmienia się tylko wersja (ta jedzie w `If-None-Match`).
                 $updated = $updated->withLocale($locale, $version, 0, $lock?->pulledAtFor($locale) ?? '');
+                $managedKeys[$locale] = [];
                 continue;
             }
 
@@ -235,13 +252,12 @@ final readonly class CliPull
 
             $outcomes[$locale] = ['outcome' => PullOutcome::Written->value, 'version' => $version, 'keys' => count($messages)];
             $updated = $updated->withLocale($locale, $version, count($messages), $now);
+            $managedKeys[$locale] = array_keys($messages);
         }
 
-        if (!$checkOnly && $failure === null) {
-            // Lock zapisujemy także wtedy, gdy nic nie zapisano: on opisuje **stan repozytorium**,
-            // więc po pierwszym `pull` musi istnieć, żeby następny mógł zadać `If-None-Match`.
-            // Po niepowodzeniu **nie zapisujemy go wcale** — lock, który opisuje tylko część
-            // języków, kłamałby o repozytorium, a `--check` słusznie zgłosi wtedy rozjazd.
+        if (!$checkOnly && $failure === null && $written > 0 && $config->downloadPostProcessCommand !== null) {
+            // A failed hook leaves only provisional metadata, without proofs for
+            // written locales. A retry must download and run the hook again.
             $lockStore->save($updated);
         }
 
@@ -263,6 +279,24 @@ final readonly class CliPull
 
                 return ExitCode::Failure;
             }
+        }
+
+        if (!$checkOnly && $failure === null) {
+            foreach ($managedKeys as $locale => $keys) {
+                $snapshot = $this->snapshots->capture($config, $root, $locale, $keys);
+                if ($snapshot === null) {
+                    $this->printer->error(sprintf('%s: nie mogę potwierdzić zapisanych kluczy po pobraniu lub hooku. Uruchom pull ponownie.', $locale));
+                    return ExitCode::Failure;
+                }
+                $updated = $updated->withLocale(
+                    $locale,
+                    $updated->versionFor($locale) ?? 0,
+                    $updated->keysFor($locale) ?? 0,
+                    $updated->pulledAtFor($locale),
+                    $snapshot,
+                );
+            }
+            $lockStore->save($updated);
         }
 
         $this->printer->json([
@@ -298,7 +332,7 @@ final readonly class CliPull
 
         if ($checkOnly && $drifted) {
             $this->printer->error(
-                'Repozytorium nie odpowiada serwisowi: katalog zmienił się od ostatniego pull. Uruchom `babelhub pull` i zacommituj pliki.'
+                'Repozytorium nie odpowiada serwisowi: zmienił się katalog, lokalne pliki lub konfiguracja zapisu. Uruchom `babelhub pull` i zacommituj pliki.'
             );
 
             return ExitCode::CheckFailed;
@@ -354,7 +388,7 @@ final readonly class CliPull
      *
      * Trzy rzeczy, które muszą być prawdą, żeby ten hook dawał się w ogóle używać w CI:
      *
-     * 1. **Pliki są już zapisane i lock już opisuje nowy stan.** Hook jest krokiem *po* `pull`,
+     * 1. **Pliki i prowizoryczne metadane są już zapisane.** Hook jest krokiem *po* `pull`,
      *    więc jego niepowodzenie nie może wyglądać jak nieudane pobranie — komunikat mówi wprost,
      *    co jest w repozytorium, a kod wyjścia (`1`) znaczy „narzędzie nie dokończyło pracy”.
      * 2. **Kod wyjścia hook-a jest widoczny.** `124` przy przekroczeniu limitu to konwencja
@@ -397,7 +431,7 @@ final readonly class CliPull
                 $this->postProcessRunner->timeoutSeconds(),
             )
             : sprintf(
-                'Post-process „%s” zwrócił kod %d. Pliki są zapisane i lock jest aktualny, ale NIE zostały przetworzone.',
+                'Post-process „%s” zwrócił kod %d. Pliki są zapisane, ale NIE zostały przetworzone. Lock wymaga ponownego pull.',
                 $command,
                 $result['exit_code'],
             ));

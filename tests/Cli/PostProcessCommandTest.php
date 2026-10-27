@@ -138,8 +138,56 @@ final class PostProcessCommandTest extends TestCase
         self::assertFileExists($file, 'pliki są zapisane — hook jest krokiem PO pobraniu, nie zamiast niego');
         self::assertNotNull(
             $this->workspace->loadLock(),
-            'lock musi być zapisany: inaczej następny pull pobierałby wszystko od nowa, mimo że pliki są na miejscu',
+            'prowizoryczne metadane pozostają, ale bez odcisku wymagają ponownego pobrania i wykonania hooka',
         );
+    }
+
+    public function testSnapshotDescribesThePostProcessedValuesAndCheckDoesNotRunTheHook(): void
+    {
+        $client = $this->scriptCatalog($this->client(), 7, ['a.one' => 'One']);
+        $client->script('GET', self::CATALOG_PATH, [], 304);
+        $command = $this->php(
+            '$p="translations/messages.pl_PL.php"; $a=include $p; $a["a.one"]=strtoupper($a["a.one"]);'
+            . 'file_put_contents($p,"<?php return ".var_export($a,true).";"); file_put_contents("hook-count","1",FILE_APPEND);',
+        );
+        self::assertSame(ExitCode::Success->value, $this->runPull($client, $command)['code']);
+        $before = $this->workspace->read(\BabelHub\Cli\Config\CatalogLock::FILE_NAME);
+        self::assertNotNull($this->workspace->loadLock()?->snapshotFor('pl_PL'));
+        self::assertSame(ExitCode::Success->value, $this->runPull($client, $command, check: true)['code']);
+        self::assertSame('1', $this->workspace->read('hook-count'));
+        self::assertSame($before, $this->workspace->read(\BabelHub\Cli\Config\CatalogLock::FILE_NAME));
+        self::assertStringContainsString('ONE', $this->workspace->read('translations/messages.pl_PL.php'));
+    }
+
+    public function testChangingTheHookInvalidatesTheSnapshot(): void
+    {
+        $client = $this->scriptCatalog($this->client(), 7, ['a.one' => 'One']);
+        self::assertSame(ExitCode::Success->value, $this->runPull($client, $this->php('exit(0);'))['code']);
+        $before = $this->workspace->read(\BabelHub\Cli\Config\CatalogLock::FILE_NAME);
+        self::assertSame(ExitCode::CheckFailed->value, $this->runPull($client, $this->php('exit(1);'), check: true)['code']);
+        self::assertSame($before, $this->workspace->read(\BabelHub\Cli\Config\CatalogLock::FILE_NAME));
+    }
+
+    public function testFailedHookCannotAuthorize304AndIsRetriedOnTheNextPull(): void
+    {
+        $client = $this->scriptCatalog($this->client(), 7, ['a.one' => 'One']);
+        $command = $this->php('exit(is_file("allow-hook") ? 0 : 3);');
+        self::assertSame(ExitCode::Failure->value, $this->runPull($client, $command)['code']);
+        self::assertNull($this->workspace->loadLock()?->snapshotFor('pl_PL'));
+        $this->workspace->write('allow-hook', 'ready');
+        self::assertSame(ExitCode::Success->value, $this->runPull($client, $command)['code']);
+        $requests = new \Tests\Cli\Support\RecordedRequests($client);
+        self::assertSame([], $requests->headers('GET', self::CATALOG_PATH, 1));
+        self::assertNotNull($this->workspace->loadLock()?->snapshotFor('pl_PL'));
+    }
+
+    public function testSuccessfulHookThatRemovesManagedValuesCannotPublishASnapshot(): void
+    {
+        $client = $this->scriptCatalog($this->client(), 7, ['a.one' => 'One']);
+        $command = $this->php('file_put_contents("translations/messages.pl_PL.php", "<?php return [];");');
+        self::assertSame(ExitCode::Failure->value, $this->runPull($client, $command)['code']);
+        self::assertNull($this->workspace->loadLock()?->snapshotFor('pl_PL'));
+        self::assertSame(ExitCode::CheckFailed->value, $this->runPull($client, $command, check: true)['code']);
     }
 
     public function testAHookThatHangsIsKilledInsteadOfHangingThePipeline(): void
@@ -215,6 +263,7 @@ final class PostProcessCommandTest extends TestCase
         FakeApiClient $client,
         ?string $command,
         int $timeoutSeconds = PostProcessRunner::TIMEOUT_SECONDS,
+        bool $check = false,
     ): array {
         $stdout = new BufferedOutput();
         $stderr = new BufferedOutput();
@@ -223,7 +272,7 @@ final class PostProcessCommandTest extends TestCase
             $client,
             new Printer($stdout, $stderr, OutputMode::Text),
             new PostProcessRunner($timeoutSeconds),
-        ))->run($this->config($command), $this->workspace->root(), false);
+        ))->run($this->config($command), $this->workspace->root(), $check);
 
         return ['code' => $code->value, 'stdout' => $stdout->fetch(), 'stderr' => $stderr->fetch()];
     }
