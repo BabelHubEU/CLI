@@ -37,6 +37,7 @@ final readonly class CatalogLock
     public function __construct(
         public string $project,
         public array $locales,
+        public ?CatalogSource $source = null,
     ) {
     }
 
@@ -63,7 +64,11 @@ final readonly class CatalogLock
             ];
         }
 
-        return new self($project, $normalized);
+        return new self(
+            $project,
+            $normalized,
+            is_array($data['source'] ?? null) ? CatalogSource::fromArray($data['source']) : null,
+        );
     }
 
     /** @return array<string, mixed> */
@@ -72,7 +77,13 @@ final readonly class CatalogLock
         return [
             'project' => $this->project,
             'locales' => $this->locales,
+            ...($this->source !== null ? ['source' => $this->source->toArray()] : []),
         ];
+    }
+
+    public function belongsTo(string $project, CatalogSource $source): bool
+    {
+        return $this->project === $project && $this->source !== null && $this->source->equals($source);
     }
 
     public function versionFor(string $locale): ?int
@@ -128,6 +139,6 @@ final readonly class CatalogLock
         $locales = $this->locales;
         $locales[$locale] = ['version' => $version, 'keys' => $keys, 'pulled_at' => $pulledAt];
 
-        return new self($this->project, $locales);
+        return new self($this->project, $locales, $this->source);
     }
 }

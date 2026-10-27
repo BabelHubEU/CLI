@@ -384,6 +384,7 @@ PR-ze.
 
 ```json
 {"project": "learnhub",
+ "source": {"api_url": "https://babelhub.example", "organization": "acme"},
  "locales": {"en_GB": {"version": 2,  "keys": 91, "pulled_at": "…"},
              "pl_PL": {"version": 13, "keys": 91, "pulled_at": "…"}}}
 ```
@@ -391,6 +392,16 @@ PR-ze.
 To odpowiedź na pytanie „czy umiesz dać mi tłumaczenia dla konkretnego commita?”: **tak, i bez
 pytania serwera** — pliki językowe *i* lock leżą w repozytorium, więc `git checkout <commit>` daje
 komplet, a `pull --check` potwierdza zgodność z serwisu.
+
+Lock wiąże wersje z projektem, językiem oraz `source`: kanonicznym adresem serwera
+(z zachowaniem ścieżki bazowej i niestandardowego portu) i slugiem organizacji potwierdzonym
+przez `GET /api/v1/me`. Nie przechowuje tokenu ani jego odcisku. Rotacja poświadczenia w tej
+samej organizacji zachowuje możliwość rewalidacji. Zmiana serwera, organizacji lub projektu
+unieważnia poprzednie wersje: `pull` pobiera pełne katalogi i odnawia lock, a `--check`
+zgłasza rozjazd bez zapisów. Starszy lock bez `source` jest czytelny, lecz wymaga jednego
+pełnego `pull`. Niedostępna lub niepełna odpowiedź o organizacji przerywa operację bez zapisu
+locka; nie jest zastępowana nazwą profilu ani zapamiętaną nazwą wyświetlaną organizacji.
+Adres serwera nie może zawierać danych logowania, query ani fragmentu.
 
 **Czego nie ma: `pull --version=N`.** Serwis trzyma **jedną** wersję na (projekt, język) —
 historię treści planujemy dopiero w Fali 3 (`translation_revisions`). Polecenie, które

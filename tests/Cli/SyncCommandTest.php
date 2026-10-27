@@ -76,11 +76,11 @@ final class SyncCommandTest extends TestCase
 
         self::assertSame(ExitCode::Success->value, $result['code']);
         self::assertSame(
-            [self::SYNC_PATH, self::PROJECT_PATH, self::CATALOG_PATH],
+            [self::SYNC_PATH, self::PROJECT_PATH, '/api/v1/me', self::CATALOG_PATH],
             (new RecordedRequests($client))->paths(),
             'najpierw stan kodu do serwisu, potem gotowe tłumaczenia z powrotem — odwrotna kolejność pokazuje deweloperowi stan sprzed jego zmiany',
         );
-        self::assertSame(['POST', 'GET', 'GET'], (new RecordedRequests($client))->methods());
+        self::assertSame(['POST', 'GET', 'GET', 'GET'], (new RecordedRequests($client))->methods());
 
         self::assertStringContainsString('nowe 2', $result['stdout'], 'wynik pushu jest częścią wyniku sync');
         self::assertStringContainsString('zapisane (1 kluczy, wersja 4)', $result['stdout'], 'wynik pullu też');
@@ -150,7 +150,8 @@ final class SyncCommandTest extends TestCase
 
     private function client(): FakeApiClient
     {
-        return new FakeApiClient(CliWorkspace::API_URL, CliWorkspace::TOKEN);
+        return (new FakeApiClient(CliWorkspace::API_URL, CliWorkspace::TOKEN))
+            ->script('GET', '/api/v1/me', ['organization' => ['slug' => 'acme']]);
     }
 
     /** @param array<string, mixed> $overrides */

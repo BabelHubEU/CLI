@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace BabelHub\Cli\Application;
 
 use BabelHub\Cli\Config\CatalogLock;
+use BabelHub\Cli\Config\CatalogSource;
 use BabelHub\Cli\Config\CatalogLockStore;
 use BabelHub\Cli\Config\ProjectConfig;
 use BabelHub\Cli\CliIoException;
@@ -13,6 +14,7 @@ use BabelHub\Cli\Files\LocaleFile;
 use BabelHub\Cli\Http\ApiClientInterface;
 use BabelHub\Cli\Output\Printer;
 use DateTimeImmutable;
+use InvalidArgumentException;
 
 /**
  * `babelhub pull` — katalogi z serwisu do plików w repozytorium, **bez szumu w diffie**.
@@ -108,9 +110,31 @@ final readonly class CliPull
             return ExitCode::Usage;
         }
 
+        $identityResponse = $this->client->get('/api/v1/me');
+        if (!$identityResponse->isSuccess()) {
+            $this->printer->error($identityResponse->message());
+            return $identityResponse->exitCode();
+        }
+        $organization = $identityResponse->json()['organization'] ?? null;
+        $organizationSlug = is_array($organization) ? ($organization['slug'] ?? null) : null;
+        if (!is_string($organizationSlug) || trim($organizationSlug) === '') {
+            $this->printer->error('Serwis nie potwierdził organizacji źródła katalogów. Lock nie został zmieniony.');
+            return ExitCode::Failure;
+        }
+        try {
+            $source = new CatalogSource($this->client->baseUrl(), $organizationSlug);
+        } catch (InvalidArgumentException $error) {
+            $this->printer->error($error->getMessage());
+            return ExitCode::Usage;
+        }
         $lockStore = new CatalogLockStore($root);
         $lock = $lockStore->load();
-        $updated = new CatalogLock($config->project, []);
+        // Legacy locks have no trustworthy server/tenant identity. Their versions,
+        // counts and timestamps cannot be reused for the current source.
+        if ($lock !== null && !$lock->belongsTo($config->project, $source)) {
+            $lock = null;
+        }
+        $updated = new CatalogLock($config->project, [], $source);
 
         $outcomes = [];
         $drifted = false;
@@ -126,17 +150,21 @@ final readonly class CliPull
             $response = $this->client->get($projectPath . '/translations/' . rawurlencode($locale), [], $headers);
 
             if ($response->status === 304) {
+                if ($known === null) {
+                    $this->printer->error(sprintf('%s: serwis zwrócił 304 bez warunku dla zaufanego locka.', $locale));
+                    $outcomes[$locale] = ['outcome' => PullOutcome::Failed->value, 'version' => null, 'keys' => 0];
+                    $failure = ExitCode::Failure;
+                    break;
+                }
                 // Nic się nie zmieniło: **nie piszemy pliku i przepisujemy wersję do nowego locka**.
                 // Liczbę kluczy bierzemy z poprzedniego locka — serwis nie przysłał treści,
                 // więc nie mamy skąd jej wziąć, a wpisanie zera mówiłoby o katalogu nieprawdę.
                 $keys = $lock?->keysFor($locale) ?? 0;
                 $outcomes[$locale] = ['outcome' => PullOutcome::Skipped->value, 'version' => $known, 'keys' => $keys];
-                if ($known !== null) {
-                    // Datę bierzemy z **poprzedniego** locka, nie z `$now`: nic nie zapisano, więc
-                    // `pulled_at` nie ma prawa się ruszyć. Inaczej lock różni się przy każdym
-                    // przebiegu i `sync` w CI commituje samą datę — w kółko (patrz `pulledAtFor`).
-                    $updated = $updated->withLocale($locale, $known, $keys, $lock?->pulledAtFor($locale) ?? '');
-                }
+                // Datę bierzemy z **poprzedniego** locka, nie z `$now`: nic nie zapisano, więc
+                // `pulled_at` nie ma prawa się ruszyć. Inaczej lock różni się przy każdym
+                // przebiegu i `sync` w CI commituje samą datę — w kółko (patrz `pulledAtFor`).
+                $updated = $updated->withLocale($locale, $known, $keys, $lock?->pulledAtFor($locale) ?? '');
                 continue;
             }
 

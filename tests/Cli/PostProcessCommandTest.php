@@ -183,7 +183,8 @@ final class PostProcessCommandTest extends TestCase
 
     private function client(): FakeApiClient
     {
-        return new FakeApiClient(CliWorkspace::API_URL, CliWorkspace::TOKEN);
+        return (new FakeApiClient(CliWorkspace::API_URL, CliWorkspace::TOKEN))
+            ->script('GET', '/api/v1/me', ['organization' => ['slug' => 'acme']]);
     }
 
     /** @param array<string, string> $messages */

@@ -6,6 +6,7 @@ namespace Tests\Cli;
 
 use BabelHub\Cli\Application\CliPull;
 use BabelHub\Cli\Config\CatalogLock;
+use BabelHub\Cli\Config\CatalogSource;
 use BabelHub\Cli\Config\ProjectConfig;
 use BabelHub\Cli\ExitCode;
 use BabelHub\Cli\Files\LocaleFile;
@@ -191,7 +192,7 @@ final class CliPullTest extends TestCase
         $this->workspace->write('translations/messages.pl_PL.php', "<?php\n\nreturn ['a.one' => 'One'];\n");
         $this->workspace->saveLock(new CatalogLock('learnhub', [
             'pl_PL' => ['version' => 7, 'keys' => 1, 'pulled_at' => 'SENTINEL'],
-        ]));
+        ], new CatalogSource(CliWorkspace::API_URL, 'acme')));
         $lockBefore = $this->workspace->read(CatalogLock::FILE_NAME);
 
         $client = $this->scriptProject($this->client());
@@ -279,7 +280,7 @@ final class CliPullTest extends TestCase
         $file = 'translations/messages.pl_PL.php';
         $this->workspace->saveLock(new CatalogLock('learnhub', [
             'pl_PL' => ['version' => 5, 'keys' => 2, 'pulled_at' => 'SENTINEL'],
-        ]));
+        ], new CatalogSource(CliWorkspace::API_URL, 'acme')));
 
         $client = $this->scriptProject($this->client());
         $this->scriptCatalog($client, 9, ['a.one' => 'One', 'b.two' => 'Two', 'c.three' => 'Three']);
@@ -309,7 +310,7 @@ final class CliPullTest extends TestCase
         $this->workspace->write($file, "<?php\n\nreturn ['a.one' => 'One'];\n");
         $this->workspace->saveLock(new CatalogLock('learnhub', [
             'pl_PL' => ['version' => 7, 'keys' => 1, 'pulled_at' => 'SENTINEL'],
-        ]));
+        ], new CatalogSource(CliWorkspace::API_URL, 'acme')));
 
         $client = $this->scriptProject($this->client());
         $client->script('GET', self::CATALOG_PATH, [], 304);
@@ -481,7 +482,7 @@ final class CliPullTest extends TestCase
         $this->workspace->write('translations/messages.pl_PL.php', "<?php\n\nreturn ['a.one' => 'One'];\n");
         $this->workspace->saveLock(new CatalogLock('learnhub', [
             'pl_PL' => ['version' => 7, 'keys' => 1, 'pulled_at' => 'SENTINEL'],
-        ]));
+        ], new CatalogSource(CliWorkspace::API_URL, 'acme')));
 
         $client = $this->scriptProject($this->client());
         $this->scriptCatalog($client, 8, ['a.one' => 'One']);
@@ -509,7 +510,7 @@ final class CliPullTest extends TestCase
     {
         $this->workspace->saveLock(new CatalogLock(CliWorkspace::PROJECT, [
             'pl_PL' => ['version' => 5, 'keys' => 2, 'pulled_at' => '2026-01-01T00:00:00+00:00'],
-        ]));
+        ], new CatalogSource(CliWorkspace::API_URL, 'acme')));
         $client = $this->scriptProject($this->client());
         $client->scriptRaw('GET', self::CATALOG_PATH, 200, '{"application":"learnhub","locale":"pl_PL","version":9,"translations":{}}');
 
@@ -572,9 +573,108 @@ final class CliPullTest extends TestCase
         self::assertStringNotContainsString('Warning', $result['stderr'], 'surowe ostrzeżenie PHP nie może wyprzedzać naszego zdania');
     }
 
+    #[DataProvider('foreignLocks')]
+    public function testVersionsFromAnotherSourceAreNeverSentAsEtags(
+        string $project,
+        ?string $url,
+        string $organization,
+        bool $check,
+    ): void {
+        $old = new CatalogLock($project, [
+            'pl_PL' => ['version' => 7, 'keys' => 1, 'pulled_at' => '2000-01-01T00:00:00Z'],
+        ], $url !== null ? new CatalogSource($url, $organization) : null);
+        $this->workspace->saveLock($old);
+        $before = $this->workspace->read(CatalogLock::FILE_NAME);
+        $file = 'translations/messages.pl_PL.php';
+        $this->workspace->write($file, "<?php return ['a.one' => 'Old source'];\n");
+        $client = $this->scriptProject($this->client());
+        $this->scriptCatalog($client, 7, ['a.one' => 'New source']);
+        $result = $this->runPull($client, check: $check);
+        self::assertSame($check ? ExitCode::CheckFailed->value : ExitCode::Success->value, $result['code']);
+        self::assertSame([], (new RecordedRequests($client))->headers('GET', self::CATALOG_PATH));
+        if ($check) {
+            self::assertSame($before, $this->workspace->read(CatalogLock::FILE_NAME));
+            self::assertStringContainsString('Old source', $this->workspace->read($file));
+        } else {
+            self::assertSame(['a.one' => 'New source'], (new LocaleFile(ProjectConfig::FORMAT_PHP))->read($this->workspace->path($file)));
+            $updated = $this->workspace->loadLock();
+            self::assertNotNull($updated);
+            self::assertTrue($updated->belongsTo('learnhub', new CatalogSource(CliWorkspace::API_URL, 'acme')));
+            self::assertNotSame('2000-01-01T00:00:00Z', $updated->pulledAtFor('pl_PL'));
+            self::assertStringNotContainsString(CliWorkspace::TOKEN, $this->workspace->read(CatalogLock::FILE_NAME));
+        }
+    }
+
+    /** @return iterable<string, array{string, string|null, string, bool}> */
+    public static function foreignLocks(): iterable
+    {
+        foreach ([false, true] as $check) {
+            $mode = $check ? 'check' : 'pull';
+            yield $mode . ': project' => ['old-project', CliWorkspace::API_URL, 'acme', $check];
+            yield $mode . ': server' => ['learnhub', 'https://staging.babelhub.example', 'acme', $check];
+            yield $mode . ': organization' => ['learnhub', CliWorkspace::API_URL, 'another-tenant', $check];
+            yield $mode . ': legacy identity' => ['learnhub', null, 'acme', $check];
+        }
+    }
+
+    public function testCanonicalIdentityIsReusedAfterCredentialRotation(): void
+    {
+        $this->workspace->saveLock(new CatalogLock('learnhub', [
+            'pl_PL' => ['version' => 7, 'keys' => 1, 'pulled_at' => 'sentinel'],
+        ], new CatalogSource('https://BABELHUB.EXAMPLE:443/', 'acme')));
+        $before = $this->workspace->read(CatalogLock::FILE_NAME);
+        $client = $this->scriptProject($this->client());
+        $client->withToken('pat_rotated.secret');
+        $client->script('GET', self::CATALOG_PATH, [], 304);
+        self::assertSame(ExitCode::Success->value, $this->runPull($client)['code']);
+        self::assertSame(['If-None-Match' => '"7"'], (new RecordedRequests($client))->headers('GET', self::CATALOG_PATH));
+        self::assertSame($before, $this->workspace->read(CatalogLock::FILE_NAME));
+        self::assertStringNotContainsString('pat_rotated.secret', $this->workspace->read(CatalogLock::FILE_NAME));
+    }
+
+    public function testAnUnconditional304CannotConfirmAnUntrustedLock(): void
+    {
+        $this->workspace->saveLock(new CatalogLock('old-project', [
+            'pl_PL' => ['version' => 7, 'keys' => 1, 'pulled_at' => 'sentinel'],
+        ]));
+        $before = $this->workspace->read(CatalogLock::FILE_NAME);
+        $client = $this->scriptProject($this->client());
+        $client->script('GET', self::CATALOG_PATH, [], 304);
+        self::assertSame(ExitCode::Failure->value, $this->runPull($client)['code']);
+        self::assertSame([], (new RecordedRequests($client))->headers('GET', self::CATALOG_PATH));
+        self::assertSame($before, $this->workspace->read(CatalogLock::FILE_NAME));
+    }
+
+    /** @param array<string, mixed> $payload */
+    #[DataProvider('unconfirmedOrganizations')]
+    public function testUnconfirmedOrganizationCannotDownloadOrOverwriteTheLock(int $status, array $payload, int $expected): void
+    {
+        $this->workspace->saveLock(new CatalogLock('learnhub', []));
+        $before = $this->workspace->read(CatalogLock::FILE_NAME);
+        $client = new FakeApiClient(CliWorkspace::API_URL, CliWorkspace::TOKEN);
+        $client->script('GET', '/api/v1/me', $payload, $status);
+        $this->scriptProject($client);
+        self::assertSame($expected, $this->runPull($client)['code']);
+        self::assertSame(0, (new RecordedRequests($client))->countPath(self::CATALOG_PATH));
+        self::assertSame($before, $this->workspace->read(CatalogLock::FILE_NAME));
+    }
+
+    /** @return iterable<string, array{int, array<string, mixed>, int}> */
+    public static function unconfirmedOrganizations(): iterable
+    {
+        yield 'unauthorized' => [401, [], ExitCode::Unauthorized->value];
+        yield 'forbidden' => [403, [], ExitCode::Unauthorized->value];
+        yield 'rate limited' => [429, [], ExitCode::RateLimited->value];
+        yield 'server failure' => [500, [], ExitCode::Failure->value];
+        yield 'missing organization' => [200, [], ExitCode::Failure->value];
+        yield 'missing slug' => [200, ['organization' => ['name' => 'Display name']], ExitCode::Failure->value];
+        yield 'invalid slug type' => [200, ['organization' => ['slug' => 42]], ExitCode::Failure->value];
+    }
+
     private function client(): FakeApiClient
     {
-        return new FakeApiClient(CliWorkspace::API_URL, CliWorkspace::TOKEN);
+        return (new FakeApiClient(CliWorkspace::API_URL, CliWorkspace::TOKEN))
+            ->script('GET', '/api/v1/me', ['organization' => ['slug' => 'acme']]);
     }
 
     private function config(
