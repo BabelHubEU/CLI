@@ -80,6 +80,7 @@ diagnostics go to stderr. `validate` returns exit code `6` when a check fails.
 
 - [CLI manual](docs/cli.md): configuration, commands, file formats and exit codes.
 - [CI guide](docs/ci.md) and [workflow examples](examples/ci/): GitHub Actions and GitLab CI.
+- [Changelog](CHANGELOG.md): changes in each release.
 - [Contributing](CONTRIBUTING.md): local development, tests and PHAR builds.
 
 CLI messages and the detailed manual are currently in Polish.

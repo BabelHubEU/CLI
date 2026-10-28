@@ -1,0 +1,128 @@
+# Migracja .gitlab-ci.yml: testy PHP 8.3/8.5 i skany blokują publikację artefaktów.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: PHP ${{ matrix.php }} — PHPUnit, PHPStan, PHPCS
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3', '8.5']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: curl, mbstring, dom, simplexml, xml, xmlwriter
+          tools: composer:v2
+          coverage: none
+      - name: Katalog cache Composera
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: composer-${{ runner.os }}-php${{ matrix.php }}-${{ hashFiles('composer.lock') }}
+      - run: composer install --no-interaction --prefer-dist
+      - run: composer check
+
+  sast:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Skan PHP
+        run: >-
+          docker run --rm -v "$PWD:/src" -w /src
+          -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/src
+          semgrep/semgrep:1.182.0
+          semgrep scan --config p/php --error --metrics=off --disable-version-check
+
+  secret-detection:
+    name: Sekrety (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Skan pełnej historii bez ujawniania wartości sekretów
+        run: >-
+          docker run --rm -v "$PWD:/src" -w /src
+          -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/src
+          zricethezav/gitleaks:v8.30.1 git --redact --log-opts="--all"
+
+  package:
+    name: Binarka PHAR
+    runs-on: ubuntu-latest
+    needs: [verify, sast, secret-detection]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: curl, mbstring, dom, simplexml, xml, xmlwriter
+          tools: composer:v2
+          coverage: none
+      - run: composer install --no-interaction --prefer-dist
+      - name: Przygotuj opis wydania z CHANGELOG.md
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          if [ "$REF_TYPE" = tag ]; then
+            php bin/release-notes.php "$RELEASE_TAG" > release-notes.md
+          else
+            printf 'Development build. See CHANGELOG.md for release history.\n' > release-notes.md
+          fi
+      - run: php -d phar.readonly=0 build-phar.php babelhub.phar
+      - name: Uruchom PHAR poza repozytorium
+        run: |
+          cd "$RUNNER_TEMP"
+          php "$GITHUB_WORKSPACE/babelhub.phar" --version
+          php "$GITHUB_WORKSPACE/babelhub.phar" list --format=json > /dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: babelhub-phar-${{ github.sha }}
+          path: |
+            babelhub.phar
+            release-notes.md
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Wydanie z tagu
+    runs-on: ubuntu-latest
+    needs: package
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: babelhub-phar-${{ github.sha }}
+      - name: Opublikuj GitHub Release z binarką
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" babelhub.phar --verify-tag \
+            --title "BabelHub CLI $RELEASE_TAG" --notes-file release-notes.md

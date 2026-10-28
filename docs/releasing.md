@@ -11,12 +11,18 @@ to `composer.json`.
 
 ## Release sequence
 
-1. Set `Version::VALUE` to the release version without the `-dev` suffix.
-2. Commit the change and create an annotated `v<version>` tag on that exact commit.
-3. Run `composer check` on the tagged commit, then push the branch and tag to GitHub.
-4. The `release` job in `.github/workflows/ci.yml` publishes a GitHub Release with
-   `babelhub.phar` after the required checks and PHAR build pass.
-5. Immediately bump `Version::VALUE` to the next development version, commit, run
+1. Move user-facing changes from `Unreleased` into a `## [<version>] - YYYY-MM-DD` entry
+   in `CHANGELOG.md`. Use `Added`, `Changed`, `Fixed`, `Removed` or `Security` sections as needed.
+   Describe the effect on users, including compatibility and migration steps; do not paste a Git log.
+   Keep an empty `Unreleased` heading for the next cycle.
+2. Set `Version::VALUE` to the release version without the `-dev` suffix.
+3. Commit the change and create an annotated `v<version>` tag on that exact commit.
+4. Run `composer check` on the tagged commit, then push the branch and tag to GitHub.
+5. The `release` job in `.github/workflows/ci.yml` publishes a GitHub Release with
+   `babelhub.phar` after the required checks and PHAR build pass. The release body is extracted from
+   `CHANGELOG.md` by `php bin/release-notes.php v<version>`. A missing or duplicate entry,
+   invalid date, empty body, placeholder or version mismatch blocks publication.
+6. Immediately bump `Version::VALUE` to the next development version, commit, run
    `composer check` and push.
 
 Run the version checks after committing and tagging the relevant step. An uncommitted

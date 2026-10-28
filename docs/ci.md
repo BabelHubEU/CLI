@@ -9,7 +9,7 @@ w [`examples/ci/`](../examples/ci/):
 | GitLab CI | `examples/ci/gitlab-ci.yml` | `<twoje-repo>/.gitlab-ci.yml` |
 
 CI **tego repozytorium** (testy, PHPStan, PHPCS, binarka PHAR, wydanie) to inny plik:
-`.gitlab-ci.yml`. Nie mieszaj ich — fragmenty tutaj **nie uruchamiają** BabelHub, tylko
+`.github/workflows/ci.yml`. Nie mieszaj ich — fragmenty tutaj **nie uruchamiają** BabelHub, tylko
 rozmawiają z nim po HTTP.
 
 ## Co fragmenty robią i dlaczego tak
@@ -171,7 +171,7 @@ kopię katalogu obok starej (szczegóły i liczby: `docs/cli.md`, sekcja o `file
 
 Jeśli wolisz przypiąć wersję w `composer.json` projektu zamiast instalacji globalnej, użyj
 `composer require --dev babelhub/cli:~0.1.3` i wołaj `vendor/bin/babelhub` — reszta fragmentu się
-nie zmienia. Binarka bez Composera jest w wydaniach GitLaba jako asset `babelhub.phar`.
+nie zmienia. Binarka bez Composera jest w GitHub Releases jako asset `babelhub.phar`.
 
 ## Kody wyjścia w CI
 
@@ -211,8 +211,16 @@ testowej, z `workflow_dispatch` (GitHub) albo ręcznym pipeline'em (GitLab).
 
 ## Bramki CI w repozytorium CLI (dla porównania)
 
-Ten dokument opisuje CI **klienta**; repozytorium CLI ma własną bramkę w `.gitlab-ci.yml`:
+Ten dokument opisuje CI **klienta**; repozytorium CLI ma własną bramkę w `.github/workflows/ci.yml`:
 `composer check` (PHPUnit, PHPStan poziom 8, PHPCS) plus zbudowanie binarki PHAR i uruchomienie
 jej z katalogu poza repozytorium. Fragmenty z tego dokumentu pilnuje
 `tests/Contract/CiFragmentTest.php`, który zestawia je z **prawdziwym** CLI: czy każde polecenie
 i każda flaga istnieją, czy bramka nie jest wyciszona i czy token nie trafił do pliku.
+
+Workflow repozytorium uruchamia bramkę na PHP 8.3 i 8.5, SAST (Semgrep) i skan pełnej
+historii (Gitleaks). Wszystkie trzy bramki blokują budowę PHAR. Artefakt `babelhub.phar`
+jest dostępny przez 30 dni na karcie Actions każdego udanego przebiegu. Push tagu uruchamia
+te same kontrole, a potem publikuje GitHub Release z PHAR jako załącznikiem (job `release`,
+uprawnienie `contents: write` dla automatycznego `GITHUB_TOKEN`; dodatkowy token nie jest potrzebny).
+Po przeniesieniu repozytorium skonfiguruj ochronę gałęzi i aktualizuj adres źródłowy pakietu
+w Packagist. Przykłady `examples/ci/` nadal obsługują zarówno GitHuba, jak i GitLaba.
