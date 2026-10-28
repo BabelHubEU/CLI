@@ -25,7 +25,7 @@ W tym repozytorium CLI uruchamia się bez instalacji: `docker exec ts_app php bi
 | Sposób | Dla kogo | Komenda |
 | --- | --- | --- |
 | `composer global require babelhub/cli` | deweloper PHP (aktualizacje przez Composera) | `composer global require babelhub/cli:~0.1.0` (**nie `^0.1`** — Composer zawęża caret na `0.x` do dokładnej wersji i zainstalowałby `0.1.0`) |
-| **binarka PHAR** | ktoś bez Composera, obraz CI, szybka próba | asset z [wydania](https://gitlab.com/babelhub/cli/-/releases) albo `composer install && php -d phar.readonly=0 build-phar.php`; nazwa pliku może być dowolna (binarka adresuje się aliasem archiwum) |
+| **binarka PHAR** | ktoś bez Composera, obraz CI, szybka próba | asset z [wydania](https://github.com/BabelHubEU/CLI/releases) albo `composer install && php -d phar.readonly=0 build-phar.php`; nazwa pliku może być dowolna (binarka adresuje się aliasem archiwum) |
 | `bin/babelhub` z **checkoutu tego repozytorium** | praca nad CLI i bramka `composer check` | `php bin/babelhub …` (albo `composer phar` i binarka) |
 
 **PHAR buduje się w repozytorium** (nie wymaga sieci ani Boxa):
