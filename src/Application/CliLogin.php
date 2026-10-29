@@ -326,7 +326,7 @@ final readonly class CliLogin
             if (is_string($display) && $display !== '') {
                 return $display;
             }
-            $username = $user['username'] ?? null;
+            $username = $user['email'] ?? $user['username'] ?? null;
             if (is_string($username) && $username !== '') {
                 return $username;
             }

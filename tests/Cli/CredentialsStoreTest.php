@@ -162,7 +162,7 @@ final class CredentialsStoreTest extends TestCase
             'authenticated_as' => 'user',
             'organization' => ['name' => 'Acme', 'slug' => 'acme'],
             'scopes' => ['translations:read', 'qa:read'],
-            'user' => ['username' => 'admin', 'display_name' => 'Mikołaj'],
+            'user' => ['email' => 'mikolaj@example.com', 'display_name' => 'Mikołaj'],
             'token' => ['name' => 'laptop', 'created_at' => '2026-01-01T00:00:00+00:00', 'expires_at' => null],
         ]);
 
@@ -170,6 +170,7 @@ final class CredentialsStoreTest extends TestCase
 
         self::assertSame(ExitCode::Success->value, $result['code']);
         self::assertStringContainsString('Acme', $result['stdout']);
+        self::assertStringContainsString('mikolaj@example.com', $result['stdout']);
         self::assertStringContainsString('translations:read', $result['stdout']);
 
         $stored = $this->store()->load();

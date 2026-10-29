@@ -85,6 +85,19 @@ final class CliLoginTest extends TestCase
         self::assertSame('pat_dobry.sekret', $this->storedCredentials()['token']);
     }
 
+    public function testEmailIsStoredWhenTheApiReturnsNoDisplayName(): void
+    {
+        $this->client->script('GET', '/api/v1/me', [
+            'authenticated_as' => 'user',
+            'organization' => ['name' => 'Acme', 'slug' => 'acme'],
+            'scopes' => ['translations:read'],
+            'user' => ['email' => 'mikolaj@example.com'],
+        ]);
+
+        self::assertSame(ExitCode::Success, $this->login()->withToken('pat_dobry.sekret'));
+        self::assertSame('mikolaj@example.com', $this->storedCredentials()['user']);
+    }
+
     public function testStartingPairingWithoutWaitingPrintsJsonOnStdoutAndKeepsTheDeviceCodeLocal(): void
     {
         $this->client->script('POST', '/api/v1/cli/device', [

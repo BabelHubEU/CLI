@@ -104,7 +104,7 @@ final class WhoamiCommand extends Command
         $printer->plain(sprintf('  serwis:      %s', $credentials->apiUrl));
         $printer->plain(sprintf('  poświadczenie: %s', (string) ($me['authenticated_as'] ?? '—')));
         if ($user !== null) {
-            $printer->plain(sprintf('  konto:       %s (%s)', (string) ($user['display_name'] ?? '—'), (string) ($user['username'] ?? '—')));
+            $printer->plain(sprintf('  konto:       %s (%s)', (string) ($user['display_name'] ?? '—'), (string) ($user['email'] ?? $user['username'] ?? '—')));
         }
         if ($application !== null) {
             $printer->plain(sprintf('  aplikacja:   %s', (string) ($application['slug'] ?? '—')));
@@ -141,7 +141,7 @@ final class WhoamiCommand extends Command
             }
         }
 
-        $display = $user['display_name'] ?? $user['username'] ?? null;
+        $display = $user['display_name'] ?? $user['email'] ?? $user['username'] ?? null;
 
         return new Credentials(
             apiUrl: $credentials->apiUrl,
