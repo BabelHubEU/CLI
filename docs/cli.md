@@ -2,11 +2,11 @@
 
 CLI jest **kanałem akwizycji, nie funkcją premium** (§26.1 planu): instaluje się je jednym
 poleceniem, działa bez konta w panelu, a monetyzacja dzieje się po stronie hostowanego serwisu.
-Dlatego `babelhub` jest osobnym pakietem (`cli/`, manifest `cli/composer.json`), a nie konsolą
+Dlatego `babelhub` jest osobnym pakietem (manifest `composer.json` w tym repozytorium), a nie konsolą
 serwisu: nie ciągnie Doctrine, nie zna bazy i nie wymaga `composer install` w repozytorium klienta.
 
 ```bash
-composer global require babelhub/cli     # po wydaniu pakietu (Fala 1, pozycja 1.11)
+composer global require babelhub/cli     # publiczny pakiet CLI
 babelhub login                           # parowanie w przeglądarce
 babelhub init                            # projekt, język źródłowy, ścieżki plików
 babelhub scan                            # nowe klucze w kodzie
@@ -17,10 +17,11 @@ babelhub status                          # pokrycie per język, QA, gotowość
 babelhub validate                        # kontrole jako bramka CI (kod wyjścia 0/≠0)
 ```
 
-W tym repozytorium CLI uruchamia się bez instalacji: `docker exec ts_app php bin/babelhub …`
-(autoloader projektu mapuje `BabelHub\Cli\` na `cli/src/`).
+Z checkoutu CLI, po composer install, uruchamiaj `php bin/babelhub …`.
+Autoloader tego repozytorium mapuje `BabelHub\Cli\` na `src/`. Backend i kontener ts_app
+są osobnym projektem; nie są wymagane do samego uruchomienia CLI.
 
-### Trzy sposoby instalacji (1.11)
+### Trzy sposoby instalacji
 
 | Sposób | Dla kogo | Komenda |
 | --- | --- | --- |
@@ -31,8 +32,8 @@ W tym repozytorium CLI uruchamia się bez instalacji: `docker exec ts_app php bi
 **PHAR buduje się w repozytorium** (nie wymaga sieci ani Boxa):
 
 ```bash
-php -d phar.readonly=0 cli/build-phar.php        # → babelhub.phar (~1,7 MB, 10 pakietów)
-php babelhub.phar --version                      # BabelHub CLI 0.1.0-dev
+php -d phar.readonly=0 build-phar.php        # → babelhub.phar (~1,7 MB, 10 pakietów)
+php babelhub.phar --version                      # wersja z tego checkoutu
 php babelhub.phar validate --check=hardcoded-strings --directory=.   # działa bez serwera
 ```
 
@@ -41,14 +42,14 @@ php babelhub.phar validate --check=hardcoded-strings --directory=.   # działa b
 czego brakuje, i kończy się kodem `1`. Bez tego warunku nie powstaje plik, więc „build przeszedł”
 nie może znaczyć „nie ma binarki”.
 
-Co jest w środku: `cli/src/`, `bin/babelhub` i **tylko zależności CLI** — `symfony/console`,
+Co jest w środku: `src/`, `bin/babelhub` i **tylko zależności CLI** — `symfony/console`,
 `symfony/yaml` i ich przechodnie domknięcie (10 pakietów), razem z wygenerowanym autoloaderem,
 którego ścieżki są względne wobec archiwum. Czego **nie** ma: kodu serwera (`src/Modules/`),
 Doctrine'a, Slima i ścieżek absolutnych z maszyny, na której binarka powstała — pilnuje tego
 `tests/Cli/PharBuildTest`, który buduje archiwum w osobnym procesie i uruchamia je **poza
 repozytorium**.
 
-Plik nie jest commitowany (`.gitignore`): binarka powstaje z `cli/` + `composer.lock`, więc
+Plik nie jest commitowany (`.gitignore`): binarka powstaje z `src/` + `composer.lock`, więc
 wydanie dołącza ją jako asset, a repozytorium zostaje źródłem.
 
 ## `.babelhub.json` / `.babelhub.yml` — konfiguracja projektu (w repozytorium)
@@ -716,7 +717,7 @@ z kodu wyjścia. Gdy ciała nie ma (proxy, HTML), komunikat mówi `HTTP 502` i t
 **Trzy rzeczy, które wyglądają na szczegóły, a są kontraktem** (bo każda z nich komuś kiedyś
 zepsuła pipeline):
 
-* **`--version` mówi prawdę** — wypisuje stałą z `cli/src/Version.php`, tę samą, którą CLI wysyła
+* **`--version` mówi prawdę** — wypisuje stałą z `src/Version.php`, tę samą, którą CLI wysyła
   serwisowi w nagłówku `User-Agent`. Nigdy `UNKNOWN` (domyślne Symfony, gdy aplikacja nie ma
   wersji) i nigdy wartość wymyślona: warunki `if` w skryptach stoją właśnie na tej liczbie.
 * **`--timeout` faktycznie dociera do klienta HTTP.** Domyślnie 15 s na odpowiedź i 5 s na
@@ -761,7 +762,7 @@ z jaką komenda go zbudowała.
 
 ## `--version`
 
-`babelhub --version` wypisuje wersję wydania z jednej stałej (`cli/src/Version.php`). Nie jest
+`babelhub --version` wypisuje wersję wydania z jednej stałej (`src/Version.php`). Nie jest
 wyciągana z `composer.lock` ani z Git-a, bo w obrazie CI tych danych może nie być — a kłamiąca
 wersja potrafi latami psuć skrypty, które warunkują od niej kroki. Test pilnuje trzech rzeczy
 naraz: formatu wersji, zgodności z tym, co wypisuje `--version`, i obecności tej samej wartości
@@ -771,20 +772,20 @@ w `User-Agent`.
 
 ```text
 bin/babelhub                     wejście (autoload + kod wyjścia)
-cli/src/Console/                 aplikacja i komendy (login, logout, whoami, init, scan, push)
-cli/src/Application/             logika komend, którą da się przetestować bez sieci (CliLogin, CliPush)
-cli/src/Checks/                  nazwane kontrole: CheckName, ustalenia, werdykt, skaner kodu
-cli/src/Config/                  poświadczenie, stan parowania i `.babelhub.json`
-cli/src/Files/                   czytanie i zapis plików językowych (php, json) — atomowo
-cli/src/Scan/                    adapter PHP/Twig: klucze w kodzie + miejsce wystąpienia
-cli/src/Http/                    klient curl + mapowanie odpowiedzi i błędów
-cli/src/Output/                  tryby wyjścia i rozdział strumieni
-cli/composer.json                manifest pakietu (przyszłe publiczne repo, 1.11)
+src/Console/                    aplikacja i komendy (login, logout, whoami, init, scan, push)
+src/Application/                logika komend, którą da się przetestować bez sieci (CliLogin, CliPush)
+src/Checks/                     nazwane kontrole: CheckName, ustalenia, werdykt, skaner kodu
+src/Config/                     poświadczenie, stan parowania i `.babelhub.json`
+src/Files/                      czytanie i zapis plików językowych (php, json) — atomowo
+src/Scan/                       adapter PHP/Twig: klucze w kodzie + miejsce wystąpienia
+src/Http/                       klient curl + mapowanie odpowiedzi i błędów
+src/Output/                     tryby wyjścia i rozdział strumieni
+composer.json                    manifest opublikowanego pakietu
 tests/Cli/                       zachowanie CLI: kody wyjścia, pliki, strumienie
 ```
 
-Sercem bramki jest `cli/src/Application/CliValidate.php` (zbiera komplet kontroli, drukuje wynik
-i wydaje werdykt), a nazwy i wagi siedzą w `cli/src/Checks/` — jedno miejsce na cztery kontrole,
+Sercem bramki jest `src/Application/CliValidate.php` (zbiera komplet kontroli, drukuje wynik
+i wydaje werdykt), a nazwy i wagi siedzą w `src/Checks/` — jedno miejsce na cztery kontrole,
 żeby `--help`, `checks.run` i test kontraktu fragmentów CI czytały tę samą listę.
 
 Strona serwisowa parowania: `Identity/.../CliAuthApiController` (publiczne `/api/v1/cli/*`),
