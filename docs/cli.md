@@ -1,5 +1,16 @@
 # BabelHub CLI (`babelhub`)
 
+> **Dokumentacja publiczna jest gdzie indziej.** Strony `/docs` i `/docs/cli` w panelu BabelHub
+> (źródło: `Backend/docs/public/{pl,en}/`) są **kanonicznym** opisem dla osób, które dopiero
+> zaczynają: instalacja, komendy, kody wyjścia, CI i webhooki. Ten plik jest dla **osób, które
+> znają podstawy** i potrzebują szczegółów, których dokumentacja publiczna świadomie nie
+> powtarza: `root_key`, znacznik synchronizacji w Gicie, `.babelhub.lock.json`, `post_process`,
+> kontrole `--check=…` i wewnętrzna kolejność źródeł poświadczenia.
+>
+> Jeśli coś jest tu sprzeczne z `/docs/cli`, wygrywa `/docs/cli` — to jest dokument
+> pomocniczy, a nie drugie źródło prawdy. Wpis w `Backend/docs` zmienia się razem z kodem
+> serwera, a ten plik bywa aktualizowany rzadziej.
+
 CLI jest **kanałem akwizycji, nie funkcją premium** (§26.1 planu): instaluje się je jednym
 poleceniem, działa bez konta w panelu, a monetyzacja dzieje się po stronie hostowanego serwisu.
 Dlatego `babelhub` jest osobnym pakietem (manifest `composer.json` w tym repozytorium), a nie konsolą

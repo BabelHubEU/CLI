@@ -78,7 +78,11 @@ diagnostics go to stderr. `validate` returns exit code `6` when a check fails.
 
 ## Documentation
 
-- [CLI manual](docs/cli.md): configuration, commands, file formats and exit codes.
+The canonical user documentation lives in the product: `/docs` and `/docs/cli` on your BabelHub
+instance (source: `Backend/docs/public/`). This repository keeps the maintainer-side details.
+
+- [CLI manual](docs/cli.md): details the public pages deliberately leave out (`root_key`, Git
+  sync marker, lock file, `post_process`, named checks).
 - [CI guide](docs/ci.md) and [workflow examples](examples/ci/): GitHub Actions and GitLab CI.
 - [Changelog](CHANGELOG.md): changes in each release.
 - [Contributing](CONTRIBUTING.md): local development, tests and PHAR builds.
