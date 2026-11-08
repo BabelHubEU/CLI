@@ -264,28 +264,6 @@ final class InitCommand extends Command
             return ExitCode::Usage->value;
         }
 
-        $configFile = $this->stringOption($input, 'config');
-        if ($configFile !== null && !in_array($configFile, ['json', 'yaml', 'yml'], true)) {
-            $printer->error('Nieznana wartość --config. Dozwolone: json, yaml.');
-
-            return ExitCode::Usage->value;
-        }
-
-        $fileName = in_array($configFile, ['yaml', 'yml'], true)
-            ? ProjectConfig::FILE_NAME_YAML
-            : ProjectConfig::FILE_NAME;
-
-        $configFile = $this->stringOption($input, 'config');
-        if ($configFile !== null && !in_array($configFile, ['json', 'yaml', 'yml'], true)) {
-            $printer->error('Nieznana wartość --config. Dozwolone: json, yaml.');
-
-            return ExitCode::Usage->value;
-        }
-
-        $fileName = in_array($configFile, ['yaml', 'yml'], true)
-            ? ProjectConfig::FILE_NAME_YAML
-            : ProjectConfig::FILE_NAME;
-
         $path = $this->configs->save($config, $directory, $fileName);
 
         $printer->json([
@@ -302,15 +280,34 @@ final class InitCommand extends Command
         $printer->result(sprintf('  język źródłowy: %s', $config->sourceLocale));
         $printer->result(sprintf('  pliki:          %s (%s)', $config->filePattern, $config->fileFormat));
         $printer->result(sprintf('  skan:           %s', implode(', ', $config->scanPaths)));
+        $this->reportClientEvents($credentials);
+
         $printer->info('Dalej: `babelhub scan` (co widzi kod), potem `babelhub push`.');
 
         return ExitCode::Success->value;
     }
 
     /**
-     * @return list<array<string, mixed>>|null `null` znaczy „serwis odpowiedział błędem”;
-     *   powód jest wtedy wypisany, a kod wyjścia czeka w `$lastFailure`
+     * Zgłoszenie dwóch kroków lejka, o których wie **tylko klient**: `cli_installed` i `init`.
+     *
+     * Serwer nie widzi ani instalacji pakietu, ani uruchomienia `init`, więc CLI mówi o nich
+     * wprost — własnym tokenem, po udanym zapisie konfiguracji. Bez poświadczenia nie wysyłamy
+     * nic: instalacja bez konta nie jest raportowana, bo nie ma czyja być.
+     *
+     * Błąd zgłoszenia **nigdy** nie zmienia kodu wyjścia: lejek jest obserwacją, a nie częścią
+     * `init`. Wyjątek jest łapany szeroko, bo tu chodzi wyłącznie o „nie przeszkadzaj".
      */
+    private function reportClientEvents(Credentials $credentials): void
+    {
+        try {
+            $this->session->client($credentials)->post('/api/v1/events', [
+                'names' => ['cli_installed', 'init'],
+            ]);
+        } catch (\Throwable) {
+            // Cisza jest tu decyzją: `init` już się udał i nie może paść przez statystykę.
+        }
+    }
+
     /**
      * Start projektu próbnego: jedno żądanie, token zapisany od razu.
      *
