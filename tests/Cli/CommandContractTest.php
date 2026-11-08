@@ -39,6 +39,28 @@ use Tests\Cli\Support\FakeApiClient;
  */
 final class CommandContractTest extends TestCase
 {
+    /**
+     * Dwa kody projektu próbnego muszą dostać **zdanie od CLI**, a nie angielską notkę serwisu.
+     *
+     * Powód jest praktyczny: `trial_expired` i `trial_key_limit` wymagają od człowieka założenia
+     * konta i odebrania projektu, więc komunikat musi powiedzieć, gdzie iść. Serwis tego nie wie,
+     * bo nie wie, że rozmawia z terminalem.
+     */
+    public function testTrialErrorsCarryAnActionableHint(): void
+    {
+        $expired = new \BabelHub\Cli\Http\ApiResponse(403, '{"error":"trial_expired","message":"This trial project has expired."}');
+        self::assertStringContainsString('/trial/claim', $expired->message());
+        self::assertStringContainsString('Załóż konto', $expired->message());
+
+        $limit = new \BabelHub\Cli\Http\ApiResponse(422, '{"error":"trial_key_limit","message":"Trial projects are limited to 200 keys."}');
+        self::assertStringContainsString('200', $limit->message());
+        self::assertStringContainsString('/trial/claim', $limit->message());
+
+        // Inne błędy zostają przy zdaniu serwisu — tłumaczymy tylko to, co wymaga innej reakcji.
+        $other = new \BabelHub\Cli\Http\ApiResponse(403, '{"error":"forbidden","message":"Missing the translations:read scope."}');
+        self::assertSame('Missing the translations:read scope.', $other->message());
+    }
+
     private CliWorkspace $workspace;
 
     protected function setUp(): void

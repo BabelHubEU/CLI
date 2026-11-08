@@ -57,9 +57,21 @@ final readonly class ApiResponse
         return is_string($error) && $error !== '' ? $error : '';
     }
 
-    /** Zdanie do pokazania człowiekowi: z ciała odpowiedzi, a gdy go nie ma — z kodu HTTP. */
+    /**
+     * Zdanie do pokazania człowiekowi: z ciała odpowiedzi, a gdy go nie ma — z kodu HTTP.
+     *
+     * Dwa kody projektów próbnych dostają zdanie **od CLI**, nie od serwisu: serwis mówi po
+     * angielsku i nie wie, że klient to terminal, a te dwa przypadki wymagają od człowieka
+     * konkretnej czynności („załóż konto i odbierz projekt"). Tłumaczenie ich tutaj trzyma
+     * podpowiedź w jednym miejscu, więc `push`, `pull`, `status` i `validate` powiedzą to samo.
+     */
     public function message(): string
     {
+        $trial = $this->trialHint();
+        if ($trial !== null) {
+            return $trial;
+        }
+
         $message = $this->json()['message'] ?? null;
         if (is_string($message) && trim($message) !== '') {
             return trim($message);
@@ -68,6 +80,22 @@ final readonly class ApiResponse
         return $this->errorCode() !== ''
             ? sprintf('%s (HTTP %d)', $this->errorCode(), $this->status)
             : sprintf('HTTP %d', $this->status);
+    }
+
+    /**
+     * Podpowiedź dla dwóch kodów projektu próbnego; `null` dla pozostałych odpowiedzi.
+     *
+     * `trial_expired` znaczy „projekt wygasł" — jedyną sensowną reakcją jest założenie konta
+     * i odebranie projektu, a nie ponawianie. `trial_key_limit` znaczy „próba nie jest do pracy
+     * z takim projektem" — ten sam wniosek. Dlatego mówimy wprost, gdzie iść.
+     */
+    private function trialHint(): ?string
+    {
+        return match ($this->errorCode()) {
+            'trial_expired' => 'Projekt próbny wygasł. Załóż konto w panelu i odbierz projekt (/trial/claim) — przeniesiemy do niego tłumaczenia.',
+            'trial_key_limit' => 'Projekt próbny jest ograniczony do 200 kluczy. Załóż konto i odbierz projekt (/trial/claim), żeby pushować dalej.',
+            default => null,
+        };
     }
 
     /** Ile sekund kazał czekać serwis (`Retry-After`), o ile w ogóle powiedział. */
