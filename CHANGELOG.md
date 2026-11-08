@@ -5,6 +5,23 @@ This changelog starts with version 0.1.5; earlier releases predate it.
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-11-08
+
+### Added
+
+- `babelhub init` without a credential starts a trial project: it calls `POST /api/v1/trial`,
+  saves the returned token and continues with the project and source language the server
+  created. The trial lasts seven days and is limited to 200 keys and two languages.
+- `--target-locale` chooses the trial's target language (default `pl_PL`); `--source-locale`
+  chooses the source.
+- Expired and over-limit trials print an actionable hint with the `/trial/claim` address
+  instead of the raw server message, so the next step is "create an account", not "retry".
+
+### Changed
+
+- The CLI manual points at the product documentation (`/docs`, `/docs/cli`) as the canonical
+  user reference and keeps only the details those pages deliberately leave out.
+
 ## [0.1.5] - 2026-10-28
 
 ### Fixed
