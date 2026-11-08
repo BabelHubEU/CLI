@@ -310,6 +310,64 @@ final class InitCommandTest extends TestCase
      * `init --config=yaml` pisze `.babelhub.yml` — format, w którym sekcje `upload`/`download`/`checks`
      * czyta się w code review jak dokument (pozycja 1.12).
      */
+    /**
+     * Bez poświadczenia `init` zakłada projekt próbny — wartość przed rejestracją (4.12).
+     *
+     * Test sprawdza **całe rozliczenie tej operacji**: token zapisany (inaczej `push` nie zadziała),
+     * konfiguracja wskazuje projekt próbny z jego językami, a użytkownik dostaje adres, pod którym
+     * odbierze projekt po założeniu konta.
+     */
+    public function testWithoutCredentialsInitStartsATrialProjectAndSavesItsToken(): void
+    {
+        mkdir($this->directory . '/src', 0777, true);
+        $client = $this->client()
+            ->script('POST', '/api/v1/trial', [
+                'token' => 'trial-key.sekret',
+                'project' => 'trial-abc123def456',
+                'expires_at' => '2026-11-15T10:00:00+00:00',
+                'limits' => ['projects' => 1, 'locales' => 2, 'keys' => 200, 'days' => 7],
+            ], 201)
+            ->script('GET', self::PROJECTS_PATH, ['projects' => [[
+                'slug' => 'trial-abc123def456',
+                'name' => 'Trial project',
+                'locales' => ['en_GB', 'pl_PL'],
+                'source_locale' => 'en_GB',
+            ]]]);
+
+        $result = $this->runInit(
+            ['--api-url' => self::API_URL, '--source-locale' => 'en_GB', '--target-locale' => 'pl_PL'],
+            $client,
+            withCredentials: false,
+        );
+
+        self::assertSame(ExitCode::Success->value, $result['code'], $result['stderr']);
+        // Podpowiedzi idą na `stderr` („wynik maszynowy nie może być zanieczyszczony”), więc
+        // adres odebrania projektu sprawdzamy tam — bez niego próba jest pułapką.
+        self::assertStringContainsString('/trial/claim', $result['stderr'], 'Bez adresu odebrania projektu próba jest pułapką.');
+
+        $config = $this->writtenConfig();
+        self::assertSame('trial-abc123def456', $config['project']);
+        self::assertSame('en_GB', $config['source_locale']);
+
+        $credentials = json_decode((string) file_get_contents($this->directory . '/credentials.json'), true);
+        self::assertIsArray($credentials);
+        // Plik ma kształt `{"profiles": {"default": …}}` — domyślny profil to `default`.
+        $profile = $credentials['profiles']['default'] ?? null;
+        self::assertIsArray($profile);
+        self::assertSame('trial-key.sekret', $profile['token'] ?? null);
+    }
+
+    public function testTrialStartFailureWritesNothing(): void
+    {
+        $client = $this->client()->scriptRaw('POST', '/api/v1/trial', 422, '{"error":"validation","message":"domain.trial.unknown_locale"}');
+
+        $result = $this->runInit(['--api-url' => self::API_URL, '--source-locale' => 'xx_XX'], $client, withCredentials: false);
+
+        self::assertSame(ExitCode::Usage->value, $result['code']);
+        self::assertFileDoesNotExist($this->configPath());
+        self::assertFileDoesNotExist($this->directory . '/credentials.json');
+    }
+
     public function testTheYamlConfigFormatCanBeChosenAndLoadsBackThroughTheStore(): void
     {
         mkdir($this->directory . '/src', 0777, true);

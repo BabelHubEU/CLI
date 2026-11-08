@@ -57,6 +57,16 @@ final readonly class ApiSession
         return $this->clientFor($credentials->apiUrl, $credentials->token, $timeoutSeconds);
     }
 
+    /**
+     * Zapis poświadczenia po **udanym** starcie próby. Jedno miejsce, bo zapis musi iść do tego
+     * samego magazynu, z którego `credentials()` czyta — inaczej `init` zapisałby token gdzie
+     * indziej, niż `push` go szuka.
+     */
+    public function save(Credentials $credentials, ?string $profile = null): void
+    {
+        $this->store->save($credentials, $profile);
+    }
+
     public function clientFor(string $apiUrl, ?string $token, ?float $timeoutSeconds = null): ApiClientInterface
     {
         $timeout = $timeoutSeconds ?? ApiClient::DEFAULT_TIMEOUT_SECONDS;

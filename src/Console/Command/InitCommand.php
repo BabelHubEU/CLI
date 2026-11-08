@@ -70,6 +70,7 @@ final class InitCommand extends Command
             ->addOption('scan-path', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Katalogi do skanu (można powtórzyć).')
             ->addOption('config', null, InputOption::VALUE_REQUIRED, 'Format pliku konfiguracji: json (domyślnie) albo yaml.', 'json')
             ->addOption('directory', null, InputOption::VALUE_REQUIRED, 'Katalog, w którym zapisać konfigurację (domyślnie bieżący).')
+            ->addOption('target-locale', null, InputOption::VALUE_REQUIRED, 'Język docelowy projektu próbnego (domyślnie pl_PL).', 'pl_PL')
             ->addOption('force', null, InputOption::VALUE_NONE, 'Nadpisz istniejący .babelhub.json.');
     }
 
@@ -111,9 +112,26 @@ final class InitCommand extends Command
         );
 
         if ($credentials === null) {
-            $printer->error($this->session->missingCredentialsHint());
+            // Bez poświadczenia `init` zakłada **projekt próbny** (4.12): wartość przed rejestracją.
+            // Adres jest wymagany, bo nie ma skąd go wziąć — tokenu też nie ma.
+            $apiUrl = $this->stringOption($input, 'api-url');
+            if ($apiUrl === null) {
+                $printer->error($this->session->missingCredentialsHint());
 
-            return ExitCode::Usage->value;
+                return ExitCode::Usage->value;
+            }
+
+            $trial = $this->startTrial($input, $output, $printer, $apiUrl);
+            if ($trial === null) {
+                return ExitCode::Usage->value;
+            }
+
+            // Po zapisaniu tokenu normalny przepływ działa bez zmian: jeden projekt, znany język.
+            // Flagi ustawiamy **na tym samym wejściu**, żeby nie duplikować reszty `execute()`.
+            $input->setOption('project', $trial['project']);
+            $input->setOption('source-locale', $trial['source']);
+
+            return $this->execute($input, $output);
         }
 
         try {
@@ -292,6 +310,72 @@ final class InitCommand extends Command
     /**
      * @return list<array<string, mixed>>|null `null` znaczy „serwis odpowiedział błędem”;
      *   powód jest wtedy wypisany, a kod wyjścia czeka w `$lastFailure`
+     */
+    /**
+     * Start projektu próbnego: jedno żądanie, token zapisany od razu.
+     *
+     * Token jest zapisywany **przed** dalszymi krokami: gdyby `init` padł później (np. na zapisie
+     * konfiguracji), użytkownik nie traci projektu — wystarczy powtórzyć `babelhub init`.
+     *
+     * @return array{project: string, source: string}|null
+     */
+    private function startTrial(
+        InputInterface $input,
+        OutputInterface $output,
+        Printer $printer,
+        string $apiUrl,
+    ): ?array {
+        $source = $this->stringOption($input, 'source-locale') ?? 'en_GB';
+        $target = $this->stringOption($input, 'target-locale') ?? 'pl_PL';
+
+        try {
+            $response = $this->session->clientFor($apiUrl, null, Application::timeoutSeconds($input))
+                ->post('/api/v1/trial', ['source_locale' => $source, 'targets' => [$target]]);
+        } catch (ApiException $e) {
+            $printer->error($e->getMessage());
+
+            return null;
+        }
+
+        if (!$response->isSuccess()) {
+            $printer->error(sprintf('Nie udało się założyć projektu próbnego: %s', $response->message()));
+
+            return null;
+        }
+
+        $body = $response->json();
+        $token = $body['token'] ?? null;
+        $project = $body['project'] ?? null;
+        $expiresAt = $body['expires_at'] ?? null;
+        if (!is_string($token) || !is_string($project) || !is_string($expiresAt)) {
+            $printer->error('Serwis odpowiedział bez tokenu projektu próbnego.');
+
+            return null;
+        }
+
+        $this->session->save(new Credentials(
+            apiUrl: $apiUrl,
+            token: $token,
+            scopes: ['translations:read', 'translations:write'],
+        ));
+
+        $printer->info(sprintf(
+            'Projekt próbny „%s” gotowy. Wygasa %s.',
+            $project,
+            $expiresAt,
+        ));
+        $printer->info(sprintf(
+            'Załóż konto i wklej ten token na %s/trial/claim — projekt stanie się Twój, a token zostanie ważny.',
+            rtrim($apiUrl, '/'),
+        ));
+
+        return ['project' => $project, 'source' => $source];
+    }
+
+    /**
+     * Lista projektów albo `null`, gdy odpowiedź się nie udała (kod wyjścia w `$lastFailure`).
+     *
+     * @return list<array<string, mixed>>|null
      */
     private function fetchProjects(Credentials $credentials, Printer $printer, float $timeoutSeconds): ?array
     {
