@@ -5,6 +5,19 @@ This changelog starts with version 0.1.5; earlier releases predate it.
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-11-08
+
+### Added
+
+- `babelhub init` reports `cli_installed` and `init` to the funnel through `POST /api/v1/events`,
+  after the configuration is written and with the user's own token. An install without a
+  credential reports nothing, and a failed report never changes the exit code.
+
+### Fixed
+
+- `init` no longer repeats the `--config` validation and file-name selection three times in a
+  row. Behaviour is unchanged; the dead reassignments are gone.
+
 ## [0.1.6] - 2026-11-08
 
 ### Added
