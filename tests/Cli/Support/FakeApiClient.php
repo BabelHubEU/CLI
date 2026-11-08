@@ -121,6 +121,23 @@ final class FakeApiClient implements ApiClientInterface
         return $count;
     }
 
+    /**
+     * Ostatnie żądanie pod tę trasę — do sprawdzenia **treści**, nie tylko liczby wywołań.
+     *
+     * @return array{method: string, path: string, payload: array<string, mixed>, headers: array<string, string>}|null
+     */
+    public function lastRequest(string $method, string $path): ?array
+    {
+        $found = null;
+        foreach ($this->requests as $request) {
+            if ($request['method'] === $method && $request['path'] === $path) {
+                $found = $request;
+            }
+        }
+
+        return $found;
+    }
+
     private function next(string $method, string $path): ApiResponse
     {
         if ($this->transportFailure !== null) {

@@ -357,6 +357,43 @@ final class InitCommandTest extends TestCase
         self::assertSame('trial-key.sekret', $profile['token'] ?? null);
     }
 
+    /**
+     * Kroki lejka, o których wie tylko klient, są zgłaszane **po** udanym zapisie konfiguracji.
+     *
+     * Kolejność jest istotna: gdyby zgłoszenie szło pierwsze, użytkownik z nieudanym `init`
+     * trafiłby do statystyk jako sukces. Awaria samego zgłoszenia nie może zmienić kodu wyjścia —
+     * to obserwacja, nie część `init`.
+     */
+    public function testItReportsCliInstalledAndInitAfterWritingTheConfig(): void
+    {
+        mkdir($this->directory . '/src', 0777, true);
+        $client = $this->client()
+            ->script('GET', self::PROJECTS_PATH, ['projects' => [$this->project()]])
+            ->script('POST', '/api/v1/events', ['accepted' => ['cli_installed', 'init']]);
+
+        $result = $this->runInit(['--project' => 'learnhub', '--source-locale' => 'en_GB'], $client);
+
+        self::assertSame(ExitCode::Success->value, $result['code']);
+        self::assertSame(1, $client->callCount('POST', '/api/v1/events'));
+        self::assertSame(
+            ['cli_installed', 'init'],
+            $client->lastRequest('POST', '/api/v1/events')['payload']['names'] ?? null,
+        );
+    }
+
+    public function testAFailedEventReportDoesNotChangeTheExitCode(): void
+    {
+        mkdir($this->directory . '/src', 0777, true);
+        $client = $this->client()
+            ->script('GET', self::PROJECTS_PATH, ['projects' => [$this->project()]])
+            ->scriptRaw('POST', '/api/v1/events', 500, '{"error":"server_error"}');
+
+        $result = $this->runInit(['--project' => 'learnhub', '--source-locale' => 'en_GB'], $client);
+
+        self::assertSame(ExitCode::Success->value, $result['code'], 'Statystyka nie może psuć `init`.');
+        self::assertFileExists($this->configPath());
+    }
+
     public function testTrialStartFailureWritesNothing(): void
     {
         $client = $this->client()->scriptRaw('POST', '/api/v1/trial', 422, '{"error":"validation","message":"domain.trial.unknown_locale"}');
