@@ -63,6 +63,39 @@ repozytorium**.
 Plik nie jest commitowany (`.gitignore`): binarka powstaje z `src/` + `composer.lock`, więc
 wydanie dołącza ją jako asset, a repozytorium zostaje źródłem.
 
+## Treści poza interfejsem (`content:push` / `content:pull`)
+
+E-maile, push, SMS i teksty marketingowe trzymamy w repozytorium obok kodu, ale **osobno od
+plików językowych** — mają typ, zmienne i inny cykl życia. Format to katalog na treść:
+
+```
+content/
+  welcome-email/
+    meta.json      {"type": "email", "variables": ["name", "order"]}
+    source.html    <p>Cześć {{name}}!</p>
+    pl_PL.html     <p>Witaj {{name}}!</p>
+    de_DE.html     <p>Hallo {{name}}!</p>
+```
+
+```bash
+babelhub content:push            # katalog content/ → serwis (jedno żądanie na treść)
+babelhub content:push --dry-run  # co poleciałoby, bez zmiany danych
+babelhub content:pull            # serwis → katalog content/
+```
+
+Trzy rzeczy warte zapamiętania:
+
+* **Pliki, nie jeden JSON.** Ciało e-maila bywa długie; w JSON-ie każda zmiana to jedna długa
+  linia z `\n`, a wtedy code review przestaje widzieć, co się zmieniło.
+* **Jedno żądanie na treść.** Trzy z pięciu treści wejdą, a dwie wrócą z konkretnym powodem
+  (np. nieznana zmienna) — zamiast „cała partia padła”.
+* **`{{name}}` jedzie dosłownie.** CLI nie wykonuje szablonu; walidację zmiennych i podgląd robi
+  serwis, żeby reguła była w jednym miejscu.
+
+`content:pull` nie nadpisuje plików, których nie utworzyło (README w katalogu treści zostaje),
+i nie przenosi statusu wariantu — pliki niosą treść, status wraca jako `draft` przy następnym
+pushu. To świadome: status to stan pracy w serwisie, nie fakt o treści w repozytorium.
+
 ## `.babelhub.json` / `.babelhub.yml` — konfiguracja projektu (w repozytorium)
 
 `babelhub init` zapisuje plik, który **przechodzi code review** i mówi, co synchronizować:

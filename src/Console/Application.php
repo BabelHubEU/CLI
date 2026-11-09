@@ -101,6 +101,8 @@ final class Application
         $application->addCommand(new LogoutCommand($store));
         $application->addCommand(new WhoamiCommand($store, $clientFactory));
         $application->addCommand(new InitCommand(new ProjectConfigStore(self::startDirectory()), $session));
+        $application->addCommand(new \BabelHub\Cli\Console\Command\ContentPushCommand($session));
+        $application->addCommand(new \BabelHub\Cli\Console\Command\ContentPullCommand($session));
         $application->addCommand(new ScanCommand($scanner));
         $application->addCommand(new PushCommand($session, $scanner));
         $application->addCommand(new PullCommand($session));
