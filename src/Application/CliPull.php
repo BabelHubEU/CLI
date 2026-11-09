@@ -175,7 +175,11 @@ final readonly class CliPull
                 // Datę bierzemy z **poprzedniego** locka, nie z `$now`: nic nie zapisano, więc
                 // `pulled_at` nie ma prawa się ruszyć. Inaczej lock różni się przy każdym
                 // przebiegu i `sync` w CI commituje samą datę — w kółko (patrz `pulledAtFor`).
-                $updated = $updated->withLocale($locale, $known, $keys, $lock?->pulledAtFor($locale) ?? '', $snapshot);
+                // `$lock` może tu być `null` (legacy lock albo brak pliku), a `pulledAtFor`
+                // zwraca `string` — więc null obsługujemy jawnie, zamiast `?? ''` na wartości,
+                // której PHPStan i tak nie widzi jako nullowalnej w tym miejscu.
+                $pulledAt = $lock !== null ? $lock->pulledAtFor($locale) : '';
+                $updated = $updated->withLocale($locale, $known, $keys, $pulledAt, $snapshot);
                 $managedKeys[$locale] = $snapshot->keys;
                 continue;
             }
