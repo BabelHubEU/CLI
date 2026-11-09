@@ -5,6 +5,25 @@ This changelog starts with version 0.1.5; earlier releases predate it.
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-11-09
+
+### Added
+
+- `babelhub content:push` sends emails, push, SMS and marketing copy from `content/` — one
+  directory per item with `meta.json`, `source.html` and `<locale>.html`. One request per item,
+  so a single bad template (an undeclared variable) is reported on its own instead of sinking
+  the batch; `--dry-run` reads the files and sends nothing.
+- `babelhub content:pull` writes the same layout back from the service and leaves files it did
+  not create untouched. It does not carry the approval status: files hold content, status is a
+  fact about the work in the service.
+
+### Fixed
+
+- The dependency lock resolves for PHP 8.3, the minimum supported runtime, after a lock built
+  on a newer PHP broke `composer install` on the oldest CI leg.
+- `symfony/yaml` and `symfony/console` are past the YAML parser ReDoS advisory; the CLI parses
+  `.babelhub.yml` from a cloned repository, so the parser is reachable from untrusted input.
+
 ## [0.1.7] - 2026-11-08
 
 ### Added
